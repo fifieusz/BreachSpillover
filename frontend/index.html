@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BreachSpillover — Production Security Intelligence & Exposure Ledger</title>
+    <meta name="description" content="Local OSINT Digital Risk Protection tool tracing compromised credentials, infostealer malware dumps, physical footprints, and household attack chains.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%230E1117%22/><text y=%22.75em%22 x=%2250%25%22 font-size=%2260%22 text-anchor=%22middle%22 fill=%22%23EF4444%22 font-family=%22monospace%22 font-weight=%22bold%22>BS</text></svg>">
+    
+    <!-- Precision Typography Stack: Geist Sans, Plus Jakarta Sans, Space Grotesk, JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet.js for Geospatial Threat Mapping -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- html2pdf for Executive Reports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    
+    <!-- Tailwind CSS Script for Zero-Build Utility Support -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        canvas: '#090A0F',
+                        surface: '#0E1117',
+                        elevated: '#12151C',
+                        'elevated-hover': '#171B24',
+                        card: '#11151F',
+                        'card-hover': '#161B26',
+                        crimson: {
+                            DEFAULT: '#EF4444',
+                            dim: '#7F1D1D',
+                            subtle: 'rgba(239, 68, 68, 0.12)'
+                        },
+                        emerald: {
+                            DEFAULT: '#10B981',
+                            dim: '#064E3B',
+                            subtle: 'rgba(16, 185, 129, 0.12)'
+                        },
+                        amber: {
+                            DEFAULT: '#F59E0B',
+                            dim: '#78350F',
+                            subtle: 'rgba(245, 158, 11, 0.12)'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Geist', 'Plus Jakarta Sans', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'Geist Mono', 'ui-monospace', 'monospace'],
+                        display: ['Space Grotesk', 'sans-serif']
+                    }
+                }
+            }
+        };
+    </script>
+
+    <!-- Anti-FOUC Early Theme Resolution -->
+    <script>
+        (function() {
+            try {
+                const stored = localStorage.getItem('breachspillover_theme');
+                if (stored === 'light' || (!stored && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)) {
+                    document.documentElement.classList.remove('dark');
+                    document.documentElement.classList.add('light');
+                    document.documentElement.setAttribute('data-theme', 'light');
+                } else {
+                    document.documentElement.classList.add('dark');
+                    document.documentElement.classList.remove('light');
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                }
+            } catch(e) {}
+        })();
+    </script>
+
+    <!-- Bundled Vis.js (100% Offline Network Graph Engine) -->
+    <script src="/static/js/vendor/vis-network.min.js"></script>
+
+    <!-- Application CSS -->
+    <link rel="stylesheet" href="/static/css/style.css?v=8.0">
+</head>
+<body class="font-sans min-h-screen selection:bg-blue-100 selection:text-blue-900 dark:selection:bg-zinc-800 dark:selection:text-white">
+
+    <!-- Top Navigation Bar (Instrument Status Bar) -->
+    <header class="app-header">
+        <div class="header-inner">
+            <div class="brand">
+                <div class="brand-shield font-mono font-bold text-xs tracking-tighter">BS</div>
+                <div class="brand-text">
+                    <span class="brand-title tracking-tight">BreachSpillover</span>
+                    <span class="brand-subtitle font-mono tracking-wider text-[11px] text-zinc-500 uppercase">Security Intelligence &amp; Exposure Ledger</span>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <div class="stats-counter" title="Active Threat Intelligence Corpus">
+                    <span class="stats-dot"></span>
+                    <span id="stat-threat-summary">Threat DB: 8 Leaks Indexed</span>
+                </div>
+
+                <!-- AI Engine Configuration Control -->
+                <div class="ai-header-control" title="Configure Cloud LLM Threat Model (Groq Llama 3.3 / Gemini)">
+                    <button type="button" id="btn-ai-settings" class="btn-declassify-badge" onclick="openAISettingsModal()">
+                        <span id="ai-status-icon" class="status-btn-icon"></span>
+                        <span id="ai-status-text">AI ENGINE: READY</span>
+                    </button>
+                </div>
+
+                <!-- Combolist Ingestion Modal Trigger -->
+                <div class="combolist-header-control" title="Ingest Custom Combolist / Breach Data">
+                    <button type="button" id="btn-combolist-modal" class="btn-declassify-badge" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" onclick="openCombolistModal()">
+                        <span class="status-btn-icon" style="background: #38bdf8; box-shadow: 0 0 8px #38bdf8;"></span>
+                        <span id="combolist-btn-text">INGEST COMBOLIST</span>
+                    </button>
+                </div>
+
+                <!-- Retro 8-Bit Pokémon SFX Toggle -->
+                <div class="sfx-header-control" title="Toggle 8-Bit Retro Pokémon Sound Effects">
+                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge" onclick="window.sfx && window.sfx.toggle()">
+                        <span id="sfx-toggle-icon">🔊</span>
+                        <span id="sfx-toggle-text">SFX: OFF</span>
+                    </button>
+                </div>
+
+                <!-- Theme Mode Toggle Control (Dark / Light) -->
+                <div class="theme-header-control" title="Toggle Light / Dark Mode">
+                    <button type="button" id="btn-theme-toggle" class="btn-declassify-badge theme-toggle-btn" onclick="toggleTheme()">
+                        <span id="theme-toggle-icon" class="theme-icon">
+                            <svg class="theme-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="5"></circle>
+                                <line x1="12" y1="1" x2="12" y2="3"></line>
+                                <line x1="12" y1="21" x2="12" y2="23"></line>
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                                <line x1="1" y1="12" x2="3" y2="12"></line>
+                                <line x1="21" y1="12" x2="23" y2="12"></line>
+                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                            </svg>
+                        </span>
+                        <span id="theme-toggle-text">LIGHT</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Workspace Container -->
+    <main class="main-content">
+
+        <!-- Tactical Search & Investigation Cockpit -->
+        <section class="search-cockpit">
+            <!-- Scanline Animation (Active during query) -->
+            <div id="search-scanline" class="search-scanline"></div>
+
+            <div class="search-cockpit-header">
+                <div class="search-title-group">
+                    <h1 class="tracking-tight">Target Investigation Cockpit</h1>
+                    <p>Execute multi-source correlation across live darknet indices, infostealers, and verified breach disclosures.</p>
+                </div>
+            </div>
+
+            <form id="search-form" class="search-form-row" onsubmit="event.preventDefault(); triggerSearch();">
+                <div class="search-input-shell">
+                    <span class="search-prompt-prefix mono">query:// &gt;</span>
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        class="search-input" 
+                        placeholder="target@company.com, company.com, +14155550192, or credential hash..." 
+                        autocomplete="off" 
+                        spellcheck="false"
+                    >
+                    <div class="search-indicators">
+                        <span id="search-type-badge" class="search-type-badge font-mono">[STANDBY: AUTO-DETECT]</span>
+                        <span class="search-kbd-hint font-mono">⌘K</span>
+                    </div>
+                </div>
+                <button type="button" id="btn-search" class="btn-primary" onclick="triggerSearch()">
+                    <span>Execute Scan</span>
+                    <span class="mono text-[10px] opacity-70">↵</span>
+                </button>
+                <button type="button" id="btn-batch-modal" class="btn-secondary" onclick="openBatchModal()">
+                    <span>Batch Audit</span>
+                </button>
+            </form>
+
+            <!-- Deep Dive Reconnaissance Anchors Option -->
+            <div class="search-anchors-toggle-row">
+                <label class="search-checkbox-label" for="toggle-extra-intel">
+                    <input type="checkbox" id="toggle-extra-intel" onchange="toggleExtraIntelFields()">
+                    <span class="checkbox-custom"></span>
+                    <span class="checkbox-text font-mono text-[11px] tracking-wide text-zinc-400">Deep Dive Reconnaissance Anchors (Add known Name, Username/Handle, Phone, Location)</span>
+                </label>
+            </div>
+            <div id="extra-intel-panel" class="extra-intel-panel" style="display: none;">
+                <div class="extra-intel-header">
+                    <span class="mono extra-intel-title text-zinc-300">INVESTIGATOR RECONNAISSANCE ANCHORS</span>
+                    <span class="badge-pill badge-neutral">FACTUAL CORRELATION ENGINE</span>
+                </div>
+                <div class="extra-intel-grid">
+                    <div class="extra-input-group">
+                        <label for="anchor-name" class="extra-label mono">KNOWN FULL NAME:</label>
+                        <input type="text" id="anchor-name" class="extra-input mono" placeholder="e.g. Alex Morgan / Jan Kowalski">
+                    </div>
+                    <div class="extra-input-group">
+                        <label for="anchor-username" class="extra-label mono">KNOWN USERNAME / HANDLE:</label>
+                        <input type="text" id="anchor-username" class="extra-input mono" placeholder="e.g. filipos / darkhunter">
+                    </div>
+                    <div class="extra-input-group">
+                        <label for="anchor-phone" class="extra-label mono">KNOWN TELEPHONE NUMBER:</label>
+                        <input type="text" id="anchor-phone" class="extra-input mono" placeholder="e.g. +1 415 555 0192 / +48 ...">
+                    </div>
+                    <div class="extra-input-group">
+                        <label for="anchor-city" class="extra-label mono">KNOWN RESIDENCE / CITY:</label>
+                        <input type="text" id="anchor-city" class="extra-input mono" placeholder="e.g. London, UK / Warsaw, Poland">
+                    </div>
+                </div>
+                <div class="extra-intel-footnote mono">
+                    Anchors are utilized to query live public profiles (Gravatar, GitHub, Duolingo, PGP) and correlate exfiltrated records without synthesizing fake data.
+                </div>
+            </div>
+
+            <!-- Example Target Quick-Launch -->
+            <div class="search-example-strip">
+                <div class="example-prompt">
+                    <span class="example-prompt-label mono">Sample Target:</span>
+                    <button type="button" class="example-target-btn" onclick="loadExampleTarget('test@gmail.com')">
+                        <span class="example-target-email mono">test@gmail.com</span>
+                        <span class="example-target-badge mono">[481+ VERIFIED BREACHES]</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dynamic Results Section -->
+        <section id="results-wrapper" class="results-wrapper flex flex-col gap-4">
+
+            <!-- State 0b: Live Deep Reconnaissance Terminal -->
+            <div id="recon-terminal" class="recon-terminal" style="display: none;">
+                <div class="recon-terminal-header">
+                    <div class="recon-terminal-status">
+                        <span class="recon-pulse-indicator"></span>
+                        <span class="mono recon-title">SOC LIVE RECONNAISSANCE PIPELINE // MULTI-HOP OSINT</span>
+                    </div>
+                    <div class="recon-terminal-meta mono">
+                        <span id="recon-target-tag">TARGET: ...</span>
+                        <span class="recon-divider">|</span>
+                        <span id="recon-timer">0.0s</span>
+                    </div>
+                </div>
+                <div id="recon-log-stream" class="recon-log-stream mono"></div>
+                <div class="recon-terminal-footer mono">
+                    <span class="recon-progress-text" id="recon-progress-text">Phase 1/6: Querying Global Breach Indices...</span>
+                    <div class="recon-progress-bar-bg">
+                        <div id="recon-progress-bar" class="recon-progress-bar-fill" style="width: 15%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- State 0: Standby / Ready State -->
+            <div id="standby-status-box" class="alert-card alert-standby-box">
+                <span class="alert-icon-tag tag-standby">[STATUS: READY]</span>
+                <div class="alert-content">
+                    <div class="alert-heading">
+                        <h3 class="tracking-tight">Awaiting Target Investigation</h3>
+                        <span class="badge-pill badge-clean">ENGINE ONLINE</span>
+                    </div>
+                    <p class="alert-desc">
+                        Enter any personal or corporate email address, domain, phone, or credential hash above, or load <button type="button" class="btn-text-link mono" onclick="loadExampleTarget('test@gmail.com')">test@gmail.com</button> to inspect a live verified threat dossier.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Domain & Email Existence Verification Alert -->
+            <div id="domain-warning-box" class="alert-card alert-warning-box" style="display: none;">
+                <span class="alert-icon-tag tag-warning">[ALERT: UNRESOLVABLE]</span>
+                <div class="alert-content">
+                    <div class="alert-heading">
+                        <h3 id="domain-warning-title" class="tracking-tight">Non-Existent Mail Domain</h3>
+                        <span class="badge-pill badge-critical" id="domain-warning-badge">NO_MX_RECORDS</span>
+                    </div>
+                    <p class="alert-desc" id="domain-warning-desc">
+                        This domain has no active MX (Mail Exchange) records. This email cannot receive messages or exist on public mail exchangers.
+                    </p>
+                </div>
+            </div>
+
+            <!-- State 1: Clean / Safe (0 Score) Affirmative Clearance Panel -->
+            <div id="clean-status-box" class="alert-card alert-clean-box" style="display: none;">
+                <div class="flex items-start justify-between w-full gap-4">
+                    <div class="flex items-center gap-3">
+                        <span class="alert-icon-tag tag-clean">[STATUS: UNCOMPROMISED]</span>
+                        <div>
+                            <h3 class="font-display font-bold text-base tracking-tight text-slate-900 dark:text-white">Zero Compromise Footprints Detected</h3>
+                            <div class="font-mono text-xs text-emerald-400 mt-0.5">SPILLOVER RISK SCORE: 0 / 100 // VERIFIED CLEARANCE</div>
+                        </div>
+                    </div>
+                    <span class="badge-pill badge-clean">AUTHENTICATED CLEAN</span>
+                </div>
+
+                <p class="alert-desc text-zinc-600 dark:text-zinc-300">
+                    Target identity <strong id="clean-email-label" class="mono text-slate-900 dark:text-white">this target</strong> does not appear in any known infostealer malware dumps, darknet combolists, or credential leaks across indexed threat intelligence repositories. No plaintext passwords, compromised residential addresses, or household attack vectors were detected.
+                </p>
+
+                <!-- Affirmative Security Recommendations Grid -->
+                <div class="clean-recommendations-section">
+                    <div class="clean-rec-title">Active Security Hygiene Recommendations</div>
+                    <div class="recommendations-grid">
+                        <div class="rec-item">
+                            <div class="rec-item-title">
+                                <span class="text-emerald-400 font-mono font-bold text-xs">[OK]</span>
+                                <span>FIDO2 / WebAuthn MFA</span>
+                            </div>
+                            <div class="rec-item-desc">Enforce hardware keys or TOTP authenticator apps. Prohibit SMS-based 2FA to prevent SIM-swap risks.</div>
+                        </div>
+                        <div class="rec-item">
+                            <div class="rec-item-title">
+                                <span class="text-emerald-400 font-mono font-bold text-xs">[OK]</span>
+                                <span>Credential Entropy Standard</span>
+                            </div>
+                            <div class="rec-item-desc">Utilize password managers to generate unique 20+ character passwords across all services.</div>
+                        </div>
+                        <div class="rec-item">
+                            <div class="rec-item-title">
+                                <span class="text-emerald-400 font-mono font-bold text-xs">[OK]</span>
+                                <span>Darknet Telemetry Monitoring</span>
+                            </div>
+                            <div class="rec-item-desc">Maintain continuous watch over darknet stealer marketplaces for prospective organizational exposures.</div>
+                        </div>
+                        <div class="rec-item">
+                            <div class="rec-item-title">
+                                <span class="text-emerald-400 font-mono font-bold text-xs">[OK]</span>
+                                <span>OAuth Token Hygiene</span>
+                            </div>
+                            <div class="rec-item-desc">Regularly review and revoke stale third-party application consents linked to corporate identity providers.</div>
+                        </div>
+                    </div>
+                    <div class="clearance-audit-stamp">
+                        <span>AUDIT_CHECK: PASS</span>
+                        <span>•</span>
+                        <span>DETERMINISTIC_MODEL: V2.0</span>
+                        <span>•</span>
+                        <span>TELEMETRY_STATUS: CONTINUOUS</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dense Summary Metrics Banner (Shown when target is investigated) -->
+            <div id="summary-metrics-banner" class="summary-metrics-banner" style="display: none;">
+                <div class="summary-metrics-grid">
+                    <div class="metric-item">
+                        <span class="metric-label">Total Breaches Found</span>
+                        <div class="metric-value-row">
+                            <span id="metric-breaches-count" class="metric-number">0</span>
+                            <span id="metric-breaches-badge" class="metric-subtag">NO_LEAKS</span>
+                        </div>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Passwords Exposed</span>
+                        <div class="metric-value-row">
+                            <span id="metric-passwords-count" class="metric-number">0</span>
+                            <span class="metric-subtag">CREDENTIALS</span>
+                        </div>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Compromised IPs / Infra</span>
+                        <div class="metric-value-row">
+                            <span id="metric-ips-count" class="metric-number">0</span>
+                            <span class="metric-subtag">NODES</span>
+                        </div>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">PII &amp; Personal Vectors</span>
+                        <div class="metric-value-row">
+                            <span id="metric-pii-count" class="metric-number">0</span>
+                            <span class="metric-subtag">VECTORS</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="summary-actions">
+                    <button type="button" id="btn-copy-report" class="btn-action-tool" onclick="copyInvestigationReport()" title="Copy Formatted Incident Summary">
+                        <span>Copy Report</span>
+                    </button>
+                    <button type="button" id="btn-export-json" class="btn-action-tool" onclick="exportInvestigationJSON()" title="Export Raw Forensic JSON Payload">
+                        <span>Export JSON</span>
+                    </button>
+                    <button type="button" id="btn-export-csv" class="btn-action-tool" onclick="exportInvestigationCSV()" title="Export Forensic CSV Ledger">
+                        <span>Export CSV</span>
+                    </button>
+                    <button type="button" id="btn-export-doc" class="btn-action-tool" onclick="exportInvestigationDOC()" title="Export Executive Word Dossier (.doc)">
+                        <span>Export DOC</span>
+                    </button>
+                    <button type="button" id="btn-export-pdf" class="btn-action-tool" onclick="exportInvestigationPDF()" title="Generate Executive PDF Report">
+                        <span>Export PDF</span>
+                    </button>
+                    <span id="summary-action-tooltip" class="action-tooltip">Copied to clipboard</span>
+                </div>
+            </div>
+
+            <!-- State 2: Active Target Bento Forensic Ledger (Shown when score > 0) -->
+            <div id="target-exposure-card" class="bento-ledger-container" style="display: none;">
+                
+                <!-- Target Identity Header Row -->
+                <div class="bento-header-row">
+                    <div class="bento-identity-cell">
+                        <div id="target-avatar" class="identity-glyph">—</div>
+                        <div class="identity-titles">
+                            <div class="identity-headline">
+                                <h2 id="target-name" class="tracking-tight">—</h2>
+                                <span id="severity-badge" class="badge-pill badge-clean">—</span>
+                                <span id="domain-status-badge" class="badge-pill badge-clean">—</span>
+                            </div>
+                            <div class="identity-subline mono">
+                                <span id="target-email-display">—</span>
+                                <span class="bullet">&bull;</span>
+                                <span id="target-title">—</span>
+                                <span class="bullet">&bull;</span>
+                                <span id="target-dept">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Compact Numerical Score Gauge -->
+                    <div class="score-index-cell">
+                        <div class="score-number-display">
+                            <span id="score-number" class="score-big-val" style="font-size: 3.2rem;">—</span>
+                        </div>
+                        <div class="score-label-col">
+                            <span class="score-tag-title">Spillover Risk Tier</span>
+                            <span class="mono text-[10px] text-zinc-500 uppercase tracking-wider">Deterministic Categorical Model</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4-Pillar Hairline Bento Grid -->
+                <div id="results-findings-grid" class="findings-grid">
+                    <!-- Pillar 1: Password -->
+                    <div class="finding-card finding-card-clickable" id="card-creds" onclick="handleFindingCardClick('creds')" title="Click to unlock/reveal leaked password">
+                        <div class="finding-header">
+                            <span class="finding-index-tag">[01 // CREDENTIALS]</span>
+                            <span class="badge-lock" id="badge-lock-creds">LOCKED</span>
+                        </div>
+                        <div id="summary-password" class="finding-main-val mono">—</div>
+                        <div id="summary-service" class="finding-sub-val">—</div>
+                    </div>
+
+                    <!-- Pillar 2: Physical Address -->
+                    <div class="finding-card finding-card-clickable" id="card-address" onclick="handleFindingCardClick('address')" title="Click to unlock/reveal residential coordinates">
+                        <div class="finding-header">
+                            <span class="finding-index-tag">[02 // RESIDENTIAL]</span>
+                            <span class="badge-lock" id="badge-lock-address">LOCKED</span>
+                        </div>
+                        <div id="summary-address" class="finding-main-val">—</div>
+                        <div id="summary-city" class="finding-sub-val">—</div>
+                    </div>
+
+                    <!-- Pillar 3: Personal Pivots -->
+                    <div class="finding-card finding-card-clickable" id="card-phone" onclick="handleFindingCardClick('phone')" title="Click to unlock/reveal mobile phone line">
+                        <div class="finding-header">
+                            <span class="finding-index-tag">[03 // TELECOM]</span>
+                            <span class="badge-lock" id="badge-lock-phone">LOCKED</span>
+                        </div>
+                        <div id="summary-phone" class="finding-main-val mono">—</div>
+                        <div id="summary-priv-email" class="finding-sub-val">—</div>
+                    </div>
+
+                    <!-- Pillar 4: Household Contact -->
+                    <div class="finding-card finding-card-clickable" id="card-relative" onclick="handleFindingCardClick('relative')" title="Click to unlock/reveal mapped household co-habitants">
+                        <div class="finding-header">
+                            <span class="finding-index-tag">[04 // HOUSEHOLD]</span>
+                            <span class="badge-lock" id="badge-lock-relative">LOCKED</span>
+                        </div>
+                        <div id="summary-relative" class="finding-main-val">—</div>
+                        <div id="summary-rel-role" class="finding-sub-val">—</div>
+                    </div>
+
+                    <!-- Pillar 5: Workplace & Employment -->
+                    <div class="finding-card finding-card-clickable" id="card-workplace" onclick="handleFindingCardClick('pivots')" title="Click to view corporate employer and workplace affiliations">
+                        <div class="finding-header">
+                            <span class="finding-index-tag">[05 // WORKPLACE]</span>
+                            <span class="badge-lock" id="badge-lock-workplace">LOCKED</span>
+                        </div>
+                        <div id="summary-workplace" class="finding-main-val">—</div>
+                        <div id="summary-workplace-role" class="finding-sub-val">—</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Investigation Workspace: Two Columns -->
+        <div class="workspace-grid">
+
+            <!-- Left Column: Risk Vectors & Evidence Tabs -->
+            <div class="workspace-left">
+
+                <!-- 5 Vector Risk Breakdown (Technical Horizontal Meters) -->
+                <section class="card-panel">
+                    <div class="panel-header">
+                        <h3 class="panel-title tracking-tight">Exposure Breakdown</h3>
+                        <span class="panel-sub" id="score-desc">Deterministic 5-Vector Weighted Model</span>
+                    </div>
+
+                    <div class="vectors-list">
+                        <!-- Vector 1 -->
+                        <div class="vector-row">
+                            <div class="vector-meta">
+                                <span class="vector-label">Infostealer Malware Logs</span>
+                                <span id="val-stealers" class="vector-pts mono">CLEAN</span>
+                            </div>
+                            <div class="vector-track">
+                                <div id="bar-stealers" class="vector-fill" style="width: 0%; background: #10b981;"></div>
+                            </div>
+                            <div id="sub-stealers" class="vector-note mono">Awaiting target query</div>
+                        </div>
+
+                        <!-- Vector 2 -->
+                        <div class="vector-row">
+                            <div class="vector-meta">
+                                <span class="vector-label">Compromised Credentials</span>
+                                <span id="val-creds" class="vector-pts mono">CLEAN</span>
+                            </div>
+                            <div class="vector-track">
+                                <div id="bar-creds" class="vector-fill" style="width: 0%; background: #10b981;"></div>
+                            </div>
+                            <div id="sub-creds" class="vector-note mono">Awaiting target query</div>
+                        </div>
+
+                        <!-- Vector 3 -->
+                        <div class="vector-row">
+                            <div class="vector-meta">
+                                <span class="vector-label">Private Identity Pivots</span>
+                                <span id="val-pivots" class="vector-pts mono">CLEAN</span>
+                            </div>
+                            <div class="vector-track">
+                                <div id="bar-pivots" class="vector-fill" style="width: 0%; background: #10b981;"></div>
+                            </div>
+                            <div id="sub-pivots" class="vector-note mono">Awaiting target query</div>
+                        </div>
+
+                        <!-- Vector 4 -->
+                        <div class="vector-row">
+                            <div class="vector-meta">
+                                <span class="vector-label">Residential Physical Footprint</span>
+                                <span id="val-physical" class="vector-pts mono">CLEAN</span>
+                            </div>
+                            <div class="vector-track">
+                                <div id="bar-physical" class="vector-fill" style="width: 0%; background: #10b981;"></div>
+                            </div>
+                            <div id="sub-physical" class="vector-note mono">Awaiting target query</div>
+                        </div>
+
+                        <!-- Vector 5 -->
+                        <div class="vector-row">
+                            <div class="vector-meta">
+                                <span class="vector-label">Household Social Engineering</span>
+                                <span id="val-family" class="vector-pts mono">CLEAN</span>
+                            </div>
+                            <div class="vector-track">
+                                <div id="bar-family" class="vector-fill" style="width: 0%; background: #10b981;"></div>
+                            </div>
+                            <div id="sub-family" class="vector-note mono">Awaiting target query</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Forensic Evidence Tabs -->
+                <section class="card-panel">
+                    <div class="tabs-nav">
+                        <button type="button" class="tab-btn active" data-tab="tab-leaks">[MALWARE &amp; LEAKS]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-creds">[CREDENTIALS]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-pivots">[PIVOTS]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-suspected">[SUSPECTED (<span id="count-suspected">0</span>)]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-physical">[RESIDENTIAL]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-provenance">[THREAT MATRIX]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-playbook">[ATTACK PLAYBOOK]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-remediations">[REMEDIATION]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-timeline">[TIMELINE]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-telemetry">[TELEMETRY]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-dorks">[OSINT DORKS]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-wmn">[WMN ENUMERATION]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-pastes">[PASTE LEAKS]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-ai">[AI DOSSIER]</button>
+                    </div>
+
+                    <div class="tabs-content">
+                        <!-- Leaks & Malware Tab: Rendered as Expandable Dense Table / Drawer -->
+                        <div id="tab-leaks" class="tab-pane active">
+                            <div id="tab-leaks-content"></div>
+                        </div>
+                        <div id="tab-creds" class="tab-pane">
+                            <div id="tab-creds-content"></div>
+                        </div>
+                        <div id="tab-pivots" class="tab-pane">
+                            <div id="tab-pivots-content"></div>
+                        </div>
+                        <div id="tab-suspected" class="tab-pane">
+                            <div id="tab-suspected-content"></div>
+                        </div>
+                        <div id="tab-physical" class="tab-pane">
+                            <div id="tab-physical-content" style="height: 100%; display: flex; flex-direction: column; gap: 10px;">
+                                <div id="map-container" style="height: 350px; width: 100%; border-radius: 8px; border: 1px solid var(--b-hairline); background: var(--c-canvas); position: relative;"></div>
+                                <div id="tab-physical-list"></div>
+                            </div>
+                        </div>
+                        <div id="tab-provenance" class="tab-pane">
+                            <div id="tab-provenance-content"></div>
+                        </div>
+                        <div id="tab-playbook" class="tab-pane">
+                            <div id="tab-playbook-content"></div>
+                        </div>
+                        <div id="tab-remediations" class="tab-pane">
+                            <div id="tab-remediations-content"></div>
+                        </div>
+                        <div id="tab-timeline" class="tab-pane">
+                            <div id="tab-timeline-content"></div>
+                        </div>
+                        <div id="tab-telemetry" class="tab-pane">
+                            <div id="tab-telemetry-content"></div>
+                        </div>
+                        <div id="tab-dorks" class="tab-pane">
+                            <div id="tab-dorks-content"></div>
+                        </div>
+                        <div id="tab-wmn" class="tab-pane">
+                            <div id="tab-wmn-content"></div>
+                        </div>
+                        <div id="tab-pastes" class="tab-pane">
+                            <div id="tab-pastes-content"></div>
+                        </div>
+                        <div id="tab-ai" class="tab-pane">
+                            <div id="tab-ai-content"></div>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+
+            <!-- Right Column: Interactive Spillover Attack Chain Graph -->
+            <div class="workspace-right">
+                <!-- Burner / Disposable Email Warning Banner -->
+                <div id="burner-email-alert" style="display: none; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="mono text-amber-500 font-bold text-sm">[!]</span>
+                        <div>
+                            <div class="mono text-xs font-bold text-amber-500 dark:text-amber-300 uppercase tracking-wide">Disposable / Burner Email Detected</div>
+                            <div id="burner-alert-text" class="text-xs text-amber-600 dark:text-amber-200 mt-0.5">Target belongs to an ephemeral burner provider. High evasion anomaly.</div>
+                        </div>
+                    </div>
+                    <span class="mono text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-200 border border-amber-500/30 px-2 py-1 rounded">HIGH_EVASION</span>
+                </div>
+
+                <section class="card-panel graph-panel">
+                    
+                    <!-- Graph Controls Toolbar -->
+                    <div class="panel-header">
+                        <div class="graph-title-group">
+                            <h3 class="panel-title tracking-tight">Spillover Identity Graph</h3>
+                            <span class="panel-sub">Categorized Attack Chain Hubs</span>
+                        </div>
+
+                        <div class="graph-toolbar">
+                            <button type="button" id="btn-graph-fit" class="btn-tool" title="Fit network to canvas">
+                                [FIT]
+                            </button>
+                            <button type="button" id="btn-graph-zoomin" class="btn-tool" title="Zoom in">
+                                [+]
+                            </button>
+                            <button type="button" id="btn-graph-zoomout" class="btn-tool" title="Zoom out">
+                                [-]
+                            </button>
+                            <button type="button" id="btn-graph-tidy" class="btn-tool" title="De-clutter & organize into concentric orbits">
+                                [TIDY ORBITS]
+                            </button>
+                            <button type="button" id="btn-graph-layout" class="btn-tool" title="Toggle flow view / organic layout">
+                                [TREE_VIEW]
+                            </button>
+                            <button type="button" id="btn-graph-physics" class="btn-tool" title="Toggle physics simulation">
+                                [PHYSICS: ON]
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Category Branch Filter Strip -->
+                    <div class="graph-category-strip">
+                        <span class="cat-strip-label mono">BRANCH:</span>
+                        <div class="cat-strip-buttons">
+                            <button type="button" class="btn-cat-filter active" data-cat="all" onclick="filterGraphCategory('all')">
+                                <span class="cat-dot" style="background: #38bdf8;"></span>[ALL]
+                            </button>
+                            <button type="button" class="btn-cat-filter" data-cat="breaches" onclick="filterGraphCategory('breaches')">
+                                <span class="cat-dot" style="background: #f43f5e;"></span>[BREACHES]
+                            </button>
+                            <button type="button" class="btn-cat-filter" data-cat="git" onclick="filterGraphCategory('git')">
+                                <span class="cat-dot" style="background: #38bdf8;"></span>[DEV &amp; GIT]
+                            </button>
+                            <button type="button" class="btn-cat-filter" data-cat="accounts" onclick="filterGraphCategory('accounts')">
+                                <span class="cat-dot" style="background: #c084fc;"></span>[ACCOUNTS]
+                            </button>
+                            <button type="button" class="btn-cat-filter" data-cat="telecom" onclick="filterGraphCategory('telecom')">
+                                <span class="cat-dot" style="background: #22d3ee;"></span>[TELECOM]
+                            </button>
+                            <button type="button" class="btn-cat-filter" data-cat="geo" onclick="filterGraphCategory('geo')">
+                                <span class="cat-dot" style="background: #34d399;"></span>[LOCATIONS]
+                            </button>
+                            <button type="button" class="btn-cat-filter" data-cat="semantic" onclick="filterGraphCategory('semantic')">
+                                <span class="cat-dot" style="background: #a855f7;"></span>[INTEL]
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Graph Canvas Shell -->
+                    <div id="network-canvas" class="graph-canvas-shell">
+                        <div id="network-graph" style="width: 100%; height: 100%;"></div>
+
+                        <!-- Loading Overlay -->
+                        <div id="loading-overlay" class="loading-overlay" style="display: none;">
+                            <div class="loading-spinner-ring"></div>
+                            <span class="loading-label">Correlating identity attack chain...</span>
+                        </div>
+
+                        <!-- Slide-in Node Inspector Drawer -->
+                        <div id="node-inspector" class="node-details-drawer" style="display: none;">
+                            <div class="drawer-header">
+                                <h4 id="inspector-node-title" class="drawer-title">Node Telemetry</h4>
+                                <button type="button" id="close-inspector" class="btn-close-drawer">&times;</button>
+                            </div>
+                            <div id="inspector-node-body" class="drawer-body">
+                                <!-- Populated dynamically on node click -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Graph Color Legend Strip -->
+                    <div class="graph-legend-strip">
+                        <span class="legend-item"><span class="legend-dot" style="background: #38bdf8;"></span>Target</span>
+                        <span class="legend-item"><span class="legend-dot" style="background: #f43f5e;"></span>Exfiltrated Breaches</span>
+                        <span class="legend-item"><span class="legend-dot" style="background: #38bdf8;"></span>Git Repos</span>
+                        <span class="legend-item"><span class="legend-dot" style="background: #c084fc;"></span>Public Accounts</span>
+                        <span class="legend-item"><span class="legend-dot" style="background: #22d3ee;"></span>Telecom E.164</span>
+                        <span class="legend-item"><span class="legend-dot" style="background: #34d399;"></span>Geospatial Records</span>
+                    </div>
+
+                </section>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Multi-Target Batch Audit Modal -->
+    <div id="batch-modal" class="modal-backdrop" style="display: none;" onclick="handleBatchModalBackdropClick(event)">
+        <div class="modal-dialog" style="max-width: 880px;">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <span class="modal-icon-badge mono text-zinc-400">[BATCH]</span>
+                    <div>
+                        <h3 class="modal-title tracking-tight">Multi-Target Exposure Audit</h3>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono">
+                            WhatBreach Batch Intelligence • Group-Wide Credential Spillover Matrix
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" onclick="closeBatchModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="batch-modal-body">
+                <div style="margin-bottom: 16px;">
+                    <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-2">
+                        ENTER TARGET EMAILS (UP TO 20, SEPARATED BY NEWLINES OR COMMAS):
+                    </label>
+                    <textarea id="batch-emails-input" class="mono text-xs w-full h-24 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md text-slate-900 dark:text-zinc-100 p-2.5 focus:border-blue-500 dark:focus:border-zinc-500 outline-none" placeholder="alice@cybercorp.io&#10;bob@cybercorp.io&#10;carol@cybercorp.io"></textarea>
+                    <div style="display: flex; gap: 8px; margin-top: 8px;">
+                        <button type="button" class="btn-primary" onclick="executeBatchAudit()">
+                            Execute Group Audit &rarr;
+                        </button>
+                        <button type="button" class="btn-secondary" onclick="loadSampleBatch()">
+                            Load Sample Team
+                        </button>
+                    </div>
+                </div>
+                <div id="batch-results-container" style="display: none; border-top: 1px solid var(--b-hairline); padding-top: 16px;">
+                    <!-- Dynamically populated by executeBatchAudit -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Corporate Domain Reconnaissance Modal -->
+    <div id="domain-recon-modal" class="modal-backdrop" style="display: none;" onclick="handleDomainModalBackdropClick(event)">
+        <div class="modal-dialog" style="max-width: 900px;">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <span class="modal-icon-badge mono text-zinc-400">[RECON]</span>
+                    <div>
+                        <h3 class="modal-title tracking-tight" id="domain-modal-title">Corporate Attack Surface Reconnaissance</h3>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono" id="domain-modal-subtitle">
+                            Certificate Transparency &amp; External Login Gateway Telemetry
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" onclick="closeDomainReconModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="domain-modal-body">
+                <!-- Dynamically populated by executeDomainRecon -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Free AI Engine Settings Modal -->
+    <div id="ai-settings-modal" class="modal-backdrop" style="display: none;" onclick="handleAISettingsBackdropClick(event)">
+        <div class="modal-dialog" style="max-width: 520px;">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <div>
+                        <h3 class="modal-title tracking-tight">AI Intelligence Engine</h3>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono">
+                            Inference configuration for CTI correlation and narrative synthesis
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" onclick="closeAISettingsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 14px;">
+                    <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">
+                        AI PROVIDER:
+                    </label>
+                    <select id="ai-provider-select" class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200" onchange="onAIProviderChanged()">
+                        <option value="groq" selected>Groq &mdash; Llama 3.3 70B</option>
+                        <option value="gemini">Google Gemini &mdash; Gemini 1.5 Flash</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label class="mono text-xs text-slate-600 dark:text-zinc-400">
+                            API KEY:
+                        </label>
+                        <a id="ai-get-key-link" href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" class="text-xs text-purple-500 dark:text-purple-400 hover:text-purple-400 dark:hover:text-purple-300 mono no-underline">
+                            Get API Key &nearr;
+                        </a>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="password" id="ai-api-key-input" class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200" placeholder="Paste API key..." autocomplete="off">
+                        <button type="button" class="btn-secondary mono text-xs px-3" onclick="toggleAIKeyVisibility()">SHOW</button>
+                    </div>
+                </div>
+
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 16px;">
+                    <button type="button" id="btn-ai-test" class="btn-secondary mono text-xs py-2 px-3" onclick="testAIKeyConnection()">
+                        Test Connection
+                    </button>
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" class="btn-tool text-red-400 border-red-900 px-3 py-1.5" onclick="clearAIKey()">Clear Key</button>
+                        <button type="button" class="btn-primary mono text-xs py-2 px-4" onclick="saveAISettings()">
+                            Save Settings &rarr;
+                        </button>
+                    </div>
+                </div>
+
+                <div id="ai-test-status" style="margin-top: 12px; display: none; padding: 8px 12px; border-radius: 4px; font-size: 0.75rem;" class="mono"></div>
+
+                <div style="margin-top: 14px; font-size: 0.7rem; color: #64748b;" class="mono text-center">
+                    API keys are stored exclusively in client-side session storage.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Combolist Ingestion Modal -->
+    <div id="combolist-modal" class="modal-backdrop" style="display: none;" onclick="handleCombolistModalBackdropClick(event)">
+        <div class="modal-dialog" style="max-width: 650px;">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <span class="modal-icon-badge mono text-sky-400">[BREACH INGESTION]</span>
+                    <div>
+                        <h3 class="modal-title tracking-tight">Combolist &amp; Threat Dump Ingestion</h3>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono">
+                            Parse credentials, compute cryptographic hashes, and enrich identity graphs
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" onclick="closeCombolistModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div>
+                        <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">LEAK / INCIDENT NAME:</label>
+                        <input type="text" id="combolist-leak-name" class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200" placeholder="e.g. Acme Corp Breach 2024">
+                    </div>
+                    <div>
+                        <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">INCIDENT DATE:</label>
+                        <input type="date" id="combolist-breach-date" class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200">
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label class="mono text-xs text-slate-600 dark:text-zinc-400">CREDENTIAL RECORDS (EMAIL:PASSWORD / USER:EMAIL:PASS):</label>
+                        <span class="mono text-xs text-slate-500 dark:text-zinc-500">Auto-delimited (: ; | tab ,)</span>
+                    </div>
+                    <textarea id="combolist-textarea" class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-xs" style="height: 180px; resize: vertical;" placeholder="alice@target.com:P@ssw0rd123&#10;bob@corp.io:Secret99!&#10;carol:carol@firm.com:Spring2024$"></textarea>
+                </div>
+
+                <div id="combolist-status" style="margin-bottom: 12px; display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.78rem;" class="mono"></div>
+
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 16px;">
+                    <button type="button" class="btn-secondary mono text-xs py-2 px-3" onclick="loadSampleCombolist()">
+                        Load Sample Records
+                    </button>
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" class="btn-tool text-zinc-400 border-zinc-700 px-3 py-1.5" onclick="closeCombolistModal()">Cancel</button>
+                        <button type="button" id="btn-submit-combolist" class="btn-primary mono text-xs py-2 px-4" onclick="submitCombolistImport()">
+                            Ingest &amp; Correlate &rarr;
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Application Logic -->
+    <script src="/static/js/app.v17.js"></script>
+</body>
+</html>

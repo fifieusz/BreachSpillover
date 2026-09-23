@@ -1,0 +1,17 @@
+# Environment & API keys
+.env
+*.env
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Data & DB (keep template/seed, ignore local db if customized)
+*.log
+
+# OS generated
+.DS_Store
+Thumbs.db
