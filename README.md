@@ -1,187 +1,290 @@
-# ⚡ BreachSpillover
+# BreachSpillover
 
-> **Universal Open-Source Digital Risk Protection (DRP) & Identity Exposure Intelligence**  
-> *A local, deterministic OSINT pivoting tool analyzing the identity "Spillover Effect" for any email address — tracing compromised credentials, infostealer malware dumps (LummaC2, RedLine, Vidar), personal identity pivots, physical residential footprints, and social engineering family vectors.*
+Identity Threat Exposure, Credential Spillover Analysis and Attack Surface Correlation Platform.
 
----
-
-## 🎯 What is BreachSpillover?
-
-Traditional breach verification platforms (such as the *Have I Been Pwned* lookup model) operate in a strictly **binary** fashion: they indicate whether a given email address was included in a known breach dump. However, they do not answer the vital question from an intelligence and security standpoint:
-
-> **"How far does the compromise actually spill over, and what can an adversary achieve by connecting the dots?"**
-
-**BreachSpillover** demonstrates and quantifies the **Spillover Effect**. The tool is built as an open, universal platform for **everyone** — whether you check a corporate executive address or an individual personal email (e.g., `user@gmail.com`, `user@proton.me`):
-
-```
-Target Email Address (e.g. alex.morgan@cybercorp.io)
-   │
-   ▼ [Infostealer Malware Exfiltration: LummaC2 / RedLine]
-Compromised Browser Vault & Cleartext Passwords (e.g., CyberSummer2024!)
-   │
-   ▼ [Identity Pivoting via OSINT Correlation]
-Private Recovery Email & Mobile Phone Number
-   │
-   ▼ [Consumer Service / Logistics Breach]
-Physical Residential Street Address & Geographic Coordinates
-   │
-   ▼ [Social Engineering Vector]
-Household Family Members & Co-habitants Sharing the Same Residence
-```
-
-The system is built upon **100% deterministic relational graph modeling (SQLite & Vis.js)** — eliminating LLM hallucinations in the threat correlation pipeline.
+BreachSpillover is an open-source, local-first intelligence platform built for security analysts, threat hunters, and red/blue teams. It aggregates dark web database dumps, infostealer malware logs, public account registrations, passive infrastructure records, and open-source intelligence (OSINT) to map out an identity's digital exposure and quantify lateral credential spillover risk.
 
 ---
 
-## 💡 Truthful Analysis vs. Interactive Simulation
+## Key Capabilities
 
-BreachSpillover enforces a strict threat-intelligence principle:
-1. **Truthful Direct Querying:** When querying an uncompromised email address (e.g., your personal `user@gmail.com`), the system **never fabricates fake leaks**. If no incident is recorded, it truthfully returns a **CLEAN status (0/100 score, 0 exposed credentials, 0 physical footprints)**.
-2. **Interactive Demo Simulation:** On any identity profile, an investigator can choose to trigger a controlled **Spillover Simulation** (`Run Demo Simulation`) or reset it back to safe status (`Reset to Clean`).
+### 1. Breach and Infostealer Intelligence
+- Indexed local SQLite database running in WAL (Write-Ahead Logging) mode for sub-millisecond querying over large breach corpora.
+- Ingestion and tracking of major darknet dumps (Collection #1, AntiPublic, Exploit.in, Adobe, LinkedIn, etc.) alongside active infostealer C2 exfiltrations (RedLine, Vidar, Lumma).
+- Automatic credential classification separating plaintext passwords from hash algorithms (bcrypt, Argon2, SHA-512 crypt, SHA-256, SHA-1, MD5, and MySQL hashes).
+- Hash resolution via public rainbow tables and reverse hash lookup endpoints.
+- Cross-identity credential matching to detect corporate password reuse across external consumer services.
+
+### 2. Multi-Source OSINT and Account Enumeration
+- **Holehe Engine**: Probes 120+ web and cloud service endpoints (Microsoft 365, Spotify, Snapchat, LastPass, Duolingo, etc.) using password-reset and registration APIs without alerting target accounts.
+- **WhatsMyName (WMN) Integration**: Dispatches concurrent multi-threaded probes across 700+ platform signatures to discover public profiles by handle.
+- **Git Archaeology**: Scrapes GitHub commit history, author metadata, and repository pages to uncover real names, personal email addresses, and portfolio links.
+- **OpenPGP Keyserver Indexing**: Queries Ubuntu HKP (`keyserver.ubuntu.com`), `keys.openpgp.org`, and MIT keyservers to extract verified PGP keys, key IDs, and secondary identities.
+- **Gravatar Profile v2**: Parses Gravatar profile data, avatars, bios, and connected social media profiles.
+
+### 3. Passive Infrastructure and DNS Reconnaissance
+- **DNS-over-HTTPS (DoH)**: Non-intrusive DNS queries through Cloudflare and Google DoH for A, AAAA, MX, TXT, NS, SOA, and CAA records.
+- **Certificate Transparency (CT) Logs**: Subdomain discovery via `crt.sh` to map organizational infrastructure and exposed endpoints (VPNs, SSO, mail gateways, developer panels).
+- **Mail Exchanger (MX) & Email Security Posture**: Identifies corporate email providers (Google Workspace, Microsoft 365, Proofpoint, Mimecast) and evaluates SPF/DMARC policies (`p=reject`, `p=quarantine`, `p=none`).
+
+### 4. Threat Dump and Paste Scraping
+- Searches active paste services and dump sites (Pastebin, JustPaste.it, Rentry, Ghostbin, ControlC) for target email mentions and leaked credentials.
+- Heuristic regex analysis detecting exposed API keys, bearer tokens, private keys, and credential patterns.
+- Calculates situational severity ratings (Critical, High, Medium, Low) based on content analysis.
+
+### 5. Interactive Attack Surface Graph
+- Interactive visualization powered by Vis.js with real-time physics simulation.
+- Categorized Provenance Hubs: Breaches, Git Repositories, Public Accounts, Telecom, and Geospatial records.
+- **Concentric Orbit Mode (`[TIDY ORBITS]`)**: Organizes the graph into concentric geometric rings centered around the target identity to declutter complex graphs.
+- **In-Place Multi-Hop Pivot Expansion**: Click any node (breach, credential, domain, handle, or identity) to dynamically traverse connected entities and query lateral records without reloading the canvas.
+- Slide-in telemetry inspector drawer detailing metadata, raw hashes, and pivot triggers.
+
+### 6. Telecom Intelligence
+- International phone number normalization and formatting (E.164 standard) via `libphonenumber`.
+- Carrier identification, line type validation (mobile, fixed-line, VOIP), and country-level routing telemetry.
+
+### 7. Pluggable AI Narrative Engine
+- Supports automated synthesis of executive threat intelligence briefings using external LLM providers.
+- Direct integration with Groq Cloud (Meta Llama 3.3 70B, ~300 tokens/sec) and Google Gemini (Gemini 1.5 Flash).
+- Generates threat actor playbooks, attack chain narratives, and structured defensive remediations.
+
+### 8. Forensic Reporting and Exports
+- **CSV Export**: Comprehensive flat spreadsheet ledger of all breaches, stolen credentials, verified handles, and geospatial footprints with UTF-8 BOM encoding for Excel compatibility.
+- **Microsoft Word (.doc) Export**: Executive incident report with summary tables, risk classifications, and confidentiality disclaimers.
+- **JSON Export**: Raw machine-readable forensic payload for SIEM and SOAR pipelines.
+- **PDF Export**: Single-click executive brief generation via HTML5 canvas renderer.
+
+### 9. Interface and System Controls
+- Dual-theme engine supporting full Dark and Light modes, with synchronized Leaflet tile layers (CartoDB DarkMatter and Positron) and graph color palettes.
+- Web Audio API 8-bit retro chiptune sound synthesis with header mute toggle.
 
 ---
 
-## 🏛️ Architecture & Project Structure
+## Architecture Overview
 
 ```
 BreachSpillover/
 ├── backend/
-│   ├── database.py         # SQLite management, relational schema DDL, indexes, and queries
-│   ├── masking.py          # Deterministic PII & credential masking engine for auditor privacy
-│   ├── scoring.py          # Deterministic Spillover Risk Score algorithm (0–100)
-│   ├── graph_builder.py    # High-contrast node/edge builder for Vis.js canvas
-│   ├── models.py           # Pydantic schema validation models
-│   └── main.py             # FastAPI REST endpoints, static files & dashboard serving
-├── data_generator/
-│   └── seed_data.py        # Seed dataset with 8 realistic threat profiles and stealer logs
+│   ├── main.py                  # FastAPI application entrypoint & API routers
+│   ├── database.py              # SQLite schema, WAL configuration & connection pool
+│   ├── osint_scanner.py         # Multi-source intelligence orchestrator
+│   ├── live_osint.py            # Holehe, Gravatar, PGP, and Git scraping modules
+│   ├── wmn_engine.py            # WhatsMyName 700+ signature probe engine
+│   ├── dns_recon.py             # DoH DNS lookups, CT log parser, and mail posture
+│   ├── paste_recon.py           # Paste site search and heuristic regex secret detector
+│   ├── telecom_recon.py         # E.164 phone normalization and carrier lookup
+│   ├── web_dork_recon.py        # Web scraping, portfolio analysis & content validation
+│   ├── graph_builder.py         # Vis.js graph transformer and multi-hop pivot logic
+│   ├── scoring.py               # Spillover risk calculation and severity engine
+│   ├── hash_resolver.py         # Rainbow table lookup and hash algorithm detector
+│   ├── ai_engine.py             # Groq and Gemini AI dossier generation
+│   ├── masking.py               # PII masking utilities for audit mode
+│   ├── models.py                # Pydantic data schemas
+│   └── data/
+│       ├── wmn-data.json        # WhatsMyName signature definitions
+│       └── hibp_breaches_catalog.json # Metadata catalog of verified breaches
 ├── frontend/
-│   ├── static/
-│   │   ├── css/style.css   # Cybersec dark theme, glassmorphism, responsive grid
-│   │   ├── js/app.js       # Dynamic UI state controller, Vis.js graph lifecycle, tabs
-│   │   └── js/vendor/      # Bundled vis-network.min.js (100% offline capability)
-│   └── index.html          # Operational intelligence dashboard
-├── tests/
-│   └── test_spillover.py   # Automated test suite (database, scoring, graph, masking, API)
+│   ├── index.html               # Single-page dashboard interface
+│   └── static/
+│       ├── css/style.css        # Responsive styling and dual-theme variables
+│       └── js/app.v17.js        # UI controller, Vis.js graph, audio engine, exports
 ├── data/
-│   └── breach_spillover.db # SQLite database file (created automatically upon first run)
-├── requirements.txt        # Python package dependencies (fastapi, uvicorn, pydantic, httpx)
-├── run.py                  # One-click startup script (seeds database if empty + runs Uvicorn)
-└── README.md
+│   └── breach_spillover.db      # Local SQLite breach and intelligence store
+├── data_generator/
+│   └── seed_data.py             # Deterministic seed data generator for testing
+├── tests/
+│   ├── test_spillover.py        # Core integration and regression test suites
+│   ├── test_ai_engine.py        # AI engine unit tests
+│   ├── test_telecom_recon.py    # Telecom parser tests
+│   └── test_friend_archaeology.py # OSINT archaeology tests
+├── import_breach.py             # High-throughput CLI leak dump and combolist importer
+├── run.py                       # One-step startup and server launcher
+└── requirements.txt             # Python package dependencies
 ```
 
 ---
 
-## 📊 Mathematical Risk Model: Spillover Score (0–100)
+## Installation
 
-The total identity exposure score is a deterministic weighted sum of 5 distinct threat dimensions:
+### Prerequisites
+- Python 3.10 or higher
+- Git
 
-$$\text{Spillover Score} = \min(100, W_{\text{stealer}} + W_{\text{creds}} + W_{\text{pivots}} + W_{\text{physical}} + W_{\text{family}})$$
+### 1. Clone the Repository
+```bash
+git clone https://github.com/fifieusz/BreachSpillover.git
+cd BreachSpillover
+```
 
-| Threat Dimension | Max Weight | Qualifying Risk Factors |
-| :--- | :---: | :--- |
-| **1. Infostealer Malware Logs** | **25 pts** | Stealer malware (LummaC2, RedLine, Vidar) exfiltrating active session tokens, browser cookies, and local credentials. |
-| **2. Passwords & Credential Reuse** | **25 pts** | Plaintext compromised passwords (+10 pts) and corporate domain/complexity matches (+15 pts). |
-| **3. Private Identity Pivots** | **20 pts** | Secondary private email addresses (+10 pts) and direct personal phone numbers (+10 pts) recovered via pivoting. |
-| **4. Physical Address Footprint** | **15 pts** | Exposure of exact residential street address, postal code, and geocoded coordinates from delivery/e-commerce leaks. |
-| **5. Social Engineering Vectors (Family)** | **15 pts** | Co-habitants, spouses, and children identified at the same address (vishing, whaling, and extortion risks). |
+### 2. Set Up a Virtual Environment
+```bash
+# On Linux / macOS
+python3 -m venv venv
+source venv/bin/activate
 
-### Exposure Levels:
-- **CLEAN (0):** No compromise detected. Clean identity profile.
-- **LOW (1–24):** Single presence in a legacy non-sensitive mailing list with strong hashing.
-- **MEDIUM (25–49):** Third-party service leaks without physical footprint correlation.
-- **HIGH (50–74):** Multiple compromised credentials combined with private email/phone pivots.
-- **CRITICAL (75–100):** Full multi-hop breach chain (active stealer dump, corporate password reuse, home address, and household family targets).
+# On Windows (PowerShell)
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+```
 
----
-
-## 🔒 Privacy & Auditor Mode
-
-To allow safe presentations and client briefings, all personally identifiable information (PII) is masked deterministically:
-- **Email:** `alex.morgan@cybercorp.io` $\rightarrow$ `a***x.m****n@cybercorp.io`
-- **Password:** `CyberSummer2024!` $\rightarrow$ `C*****r2024!` (preserves pattern recognition while obfuscating the secret)
-- **Phone:** `+1 (555) 234-5678` $\rightarrow$ `+1 (555) ***-**78`
-- **Address:** `742 Evergreen Terrace, Apt 4B` $\rightarrow$ `7** ********* *******, Apt **`
-
-The **AUDITOR / INVESTIGATOR MODE** toggle in the top navigation bar allows authorized security operators to instantly view unmasked raw records.
-
----
-
-## 🚀 Quick Start
-
-### 1. Prerequisites:
-- Python 3.10+ (tested on Python 3.12)
-
-### 2. Install Dependencies:
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Run the Application:
+### 4. Configure Environment Variables (Optional)
+Copy the template configuration file:
+```bash
+cp .env.example .env
+```
+
+Edit `.env` to supply API keys if you wish to use external AI or paid HIBP endpoints:
+```ini
+# Free instant key from https://console.groq.com/keys
+GROQ_API_KEY=your_groq_api_key_here
+
+# Free instant key from https://aistudio.google.com/app/apikey
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# Optional: Paid HIBP key (if omitted, free public indices are used automatically)
+HIBP_API_KEY=
+```
+
+---
+
+## Running the Application
+
+Start the local server using the launch script:
 ```bash
 python run.py
 ```
-> *The `run.py` script automatically initializes the database schema, populates sample threat intelligence, and launches the FastAPI server on `http://127.0.0.1:8000`.*
 
-### 4. Access the Dashboard:
-Open your browser at:
+The script initializes the local SQLite database if it does not already exist, seeds baseline test profiles, and starts the FastAPI server at:
 ```
 http://127.0.0.1:8000
 ```
 
+Open `http://127.0.0.1:8000` in any modern web browser to access the interface.
+
 ---
 
-## 🧪 Automated Testing
+## Ingesting Custom Breaches and Combolists
 
-Execute the comprehensive test suite validating the database, scoring algorithm, Vis.js graph builder, masking engine, and REST API endpoints:
+BreachSpillover includes a high-throughput CLI tool (`import_breach.py`) for importing custom leak dumps, combolists, and CSV breach data directly into the local database.
 
+### Features:
+- Auto-detects delimiters (colon, semicolon, comma, pipe, tab).
+- Detects format variations (`email:pass`, `user:email:pass`, `email:hash:salt`, etc.).
+- Automatically classifies password hashes (bcrypt, Argon2, SHA-512, SHA-256, SHA-1, MD5).
+- Performs batch inserts in transactions of 5,000 to 20,000 records for high throughput.
+
+### Usage:
 ```bash
-python tests/test_spillover.py
+# Basic combolist import (colon-delimited)
+python import_breach.py path/to/combo.txt --name "Exploit_Dump_2024"
+
+# Custom delimiter and breach metadata
+python import_breach.py leaks.csv --delimiter "," --name "Internal_Corporate_Leak" --date "2024-06-15" --severity CRITICAL
+
+# Dry-run mode to validate parsing without writing to the database
+python import_breach.py dump.txt --name "Test_Dump" --dry-run
 ```
 
-Expected output:
-```
-[*] Testing Masking Engine...
-[+] Masking Engine tests PASSED.
-[*] Testing Database queries and Scoring Engine...
-[+] Database, Scoring and Graph tests PASSED.
-[*] Testing FastAPI REST Endpoints...
-[+] FastAPI API tests PASSED.
-
-=======================================================
-ALL 3 TEST SUITES PASSED CLEANLY (100% COVERAGE)!
-=======================================================
-```
+You can also import combolists directly from the web interface using the **`[INGEST COMBOLIST]`** button in the top navigation bar.
 
 ---
 
-## 🌐 REST API Endpoints
+## API Reference
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/search?email=...&audit_mode=true` | Queries target email, runs deterministic graph pivoting, and calculates Spillover Score |
-| `POST` | `/api/simulate` | Triggers a simulated breach scenario (`"full"`, `"partial"`, or `"clean"`) on any email |
-| `POST` | `/api/reset` | Cleans an email record back to 0 breaches and 0 score |
-| `GET` | `/api/employees?audit_mode=true` | Returns directory of sample identities and active exposure indicators |
-| `GET` | `/api/stats` | Returns global threat telemetry (total identities, stealer leaks, exposed credentials) |
-| `GET` | `/` | Serves the interactive frontend single-page application |
+The backend exposes a REST API running on port 8000. Interactive Swagger documentation is available at `http://127.0.0.1:8000/docs`.
+
+### Core Endpoints
+
+#### `GET /api/search`
+Runs a full identity investigation across local breaches and live OSINT sources.
+- **Parameters**:
+  - `email` (string, required): Target email address or identifier.
+  - `audit_mode` (boolean, optional, default: `true`): Returns unmasked forensic data.
+  - `known_name` (string, optional): Known target full name to anchor OSINT correlation.
+  - `known_username` (string, optional): Known target username.
+  - `known_phone` (string, optional): Known phone number.
+  - `known_city` (string, optional): Known residential or operating city.
+- **Response**: Identity record, risk score, leak list, credentials, OSINT pivots, footprints, and Vis.js graph structure.
+
+#### `POST /api/graph/pivot-expand`
+Expands the attack graph in-place from any selected node.
+- **Request Body**:
+  ```json
+  {
+    "node_id": "leak_14",
+    "pivot_type": "BREACH",
+    "pivot_value": "Adobe Systems",
+    "employee_id": 1
+  }
+  ```
+- **Response**: New nodes and edges to merge into the active canvas.
+
+#### `GET /api/recon/wmn`
+Runs WhatsMyName profile enumeration across 700+ websites.
+- **Parameters**:
+  - `handle` (string, required): Username to query.
+  - `max_sites` (integer, optional, default: `50`): Maximum sites to probe.
+
+#### `GET /api/recon/infrastructure`
+Queries DNS-over-HTTPS and Certificate Transparency logs for domain infrastructure.
+- **Parameters**:
+  - `domain` (string, required): Domain name to evaluate (e.g., `company.com`).
+
+#### `GET /api/recon/pastes`
+Searches public paste repositories for leaked data.
+- **Parameters**:
+  - `target` (string, required): Identifier or email to search.
+  - `max_results` (integer, optional, default: `10`): Maximum results to return.
+
+#### `GET /api/recon/telecom`
+Normalizes and validates phone numbers.
+- **Parameters**:
+  - `query` (string, required): Raw phone number (e.g., `+14155552671`).
+
+#### `GET /api/hash/resolve`
+Queries public rainbow tables to crack or identify password hashes.
+- **Parameters**:
+  - `hash` (string, required): Hexadecimal or formatted hash string.
+
+#### `POST /api/ai/dossier`
+Generates a structured narrative threat brief using Groq or Gemini.
+- **Request Body**: Current investigation JSON payload.
+
+#### `GET /api/stats`
+Returns system inventory metrics, indexed breach counts, credential volumes, and pivot statistics.
 
 ---
 
-## 🛡️ Built-in Demo Target Identities
+## Running Automated Tests
 
-| Target Identity | Role / Designation | Spillover Score | Compromise Chain Summary |
-| :--- | :--- | :---: | :--- |
-| **Alex Morgan** | Chief Technology Officer | **95 (CRITICAL)** | LummaC2 Stealer $\rightarrow$ Corporate Password $\rightarrow$ Personal Gmail/Phone $\rightarrow$ Residence $\rightarrow$ Spouse & Child |
-| **Elena Rostova** | VP of Global Finance | **95 (CRITICAL)** | RedLine Stealer $\rightarrow$ Treasury Credentials $\rightarrow$ ProtonMail $\rightarrow$ Residence $\rightarrow$ Sibling |
-| **Marcus Vance** | Principal Cloud Architect | **80 (CRITICAL)** | Vidar Stealer $\rightarrow$ AWS IAM Root Pattern $\rightarrow$ Secondary Email $\rightarrow$ Residence |
-| **Sarah Jenkins** | Private Individual | **80 (CRITICAL)** | Infostealer drop $\rightarrow$ Personal password $\rightarrow$ Residential address $\rightarrow$ Family member |
-| **David Miller** | Senior Software Engineer | **28 (MEDIUM)** | E-commerce database hash $\rightarrow$ Developer forum hash $\rightarrow$ No physical footprint |
-| **Emily Watson** | Enterprise Sales Director | **28 (MEDIUM)** | Consumer retail breach + Mobility service leak $\rightarrow$ No home address leak |
-| **James Cooper** | Junior QA Engineer | **9 (LOW)** | Marketing newsletter distribution list (low-entropy leak, no credentials) |
-| **Olivia Chen** | Security Analyst | **0 (CLEAN)** | Uncompromised identity, verified clean telemetry across all breach indices |
+Run the test suite using `pytest`:
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run core spillover and OSINT integration tests
+pytest tests/test_spillover.py -v
+```
+
+### Test Suites Included:
+- **Suite 1**: PII and credential masking engine verification.
+- **Suite 2**: SQLite relational schema integrity and risk scoring calculations.
+- **Suite 3**: FastAPI REST endpoint validation and error handling.
+- **Suite 4**: Multi-source OSINT correlation and attack playbook generation.
+- **Suite 5**: EmploLeaks subdomains and handle permutations.
+- **Suite 6**: Disposable email detection and rainbow table hash resolution.
+- **Suite 7**: Universal multi-modal search and combolist importer validation.
+- **Suite 8**: WhatsMyName engine, passive DNS DoH lookups, and paste scrapers.
 
 ---
 
-## 📄 License & Open-Source Use
+## License and Ethical Use Notice
 
-BreachSpillover is published as open-source software under the MIT License. Designed for security researchers, digital risk analysts, red/blue teams, and personal identity hygiene checks.
+BreachSpillover is developed strictly for authorized security research, defensive posture assessments, and forensic investigations. Users are responsible for ensuring that all reconnaissance and analysis activities comply with relevant local and international computer crime legislation.
+
+Distributed under the MIT License.
