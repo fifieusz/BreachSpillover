@@ -151,6 +151,82 @@ const sfx = new RetroSoundEngine();
 window.sfx = sfx;
 
 /* ==========================================================================
+   SoundManager — lightweight MP3 cue player (served from /static/sounds/)
+   Shares the existing SFX mute flag (localStorage "breachspillover_sfx").
+   Degrades silently if a file is missing so audio can never break the app.
+   ========================================================================== */
+const SoundManager = {
+    _map: {
+        click: "/static/sounds/Clickingsound.mp3",
+        search: "/static/sounds/Searchingsound.mp3",
+        error: "/static/sounds/Errorsound.mp3",
+        export: "/static/sounds/Exportbuttonsound.mp3"
+    },
+    _audio: {},
+    _lastPlayed: {},
+
+    _enabled() {
+        // UI cue sounds are ON by default; only an explicit mute ("false") silences them.
+        try {
+            return localStorage.getItem("breachspillover_ui_sounds") !== "false";
+        } catch (e) {
+            return true;
+        }
+    },
+
+    toggle() {
+        let on = true;
+        try {
+            on = localStorage.getItem("breachspillover_ui_sounds") !== "false";
+            localStorage.setItem("breachspillover_ui_sounds", on ? "false" : "true");
+        } catch (e) {}
+        on = !on;
+        this.updateButtonUI();
+        if (on) this.play("click");
+        return on;
+    },
+
+    updateButtonUI() {
+        const on = this._enabled();
+        const text = document.getElementById("sfx-toggle-text");
+        const icon = document.getElementById("sfx-toggle-icon");
+        const btn = document.getElementById("btn-sfx-toggle");
+        if (text) text.innerText = on ? "SOUND: ON" : "SOUND: OFF";
+        if (icon) icon.innerText = on ? "🔊" : "🔇";
+        if (btn) btn.classList.toggle("active", on);
+    },
+
+    _get(key) {
+        if (!this._audio[key]) {
+            const el = new Audio(this._map[key]);
+            el.preload = "none";
+            el.addEventListener("error", () => {}, { once: false });
+            this._audio[key] = el;
+        }
+        return this._audio[key];
+    },
+
+    play(key) {
+        if (!this._map[key] || !this._enabled()) return;
+        // Throttle: ignore repeats of the same cue within 150ms (rapid clicks).
+        const now = Date.now();
+        if (now - (this._lastPlayed[key] || 0) < 150) return;
+        this._lastPlayed[key] = now;
+        try {
+            const el = this._get(key);
+            el.currentTime = 0;
+            const p = el.play();
+            if (p && typeof p.catch === "function") p.catch(() => {});
+        } catch (e) {
+            /* missing file / autoplay block — never surface to the user */
+        }
+    }
+};
+window.SoundManager = SoundManager;
+function playSound(key) { SoundManager.play(key); }
+window.playSound = playSound;
+
+/* ==========================================================================
    Dual Theme Color Palettes & Engine Controllers (Sleek Rounded Box Nodes)
    ========================================================================== */
 const BOX_PROPS = {
@@ -872,6 +948,176 @@ function exportInvestigationDOC() {
 }
 window.exportInvestigationDOC = exportInvestigationDOC;
 
+/* ==========================================================================
+   DEFENSIVE EXPOSURE REPORT
+   Purpose: "What exposure associated with this email can an authorized user
+   see from the application's legitimate breach and public OSINT sources?"
+   NOT a dossier. The model is built by ACTIVELY ALLOWLISTING non-sensitive
+   fields — it never copies currentInvestigationData, so credentials,
+   addresses, coordinates, relatives, phone numbers and social-engineering
+   scores can never leak into an export even if added upstream later.
+   ========================================================================== */
+const EXPOSURE_REPORT_VERSION = "1.0";
+
+function buildExposureReport(data, wmnResults) {
+    data = data || {};
+    const emp = data.employee || {};
+    const nowIso = new Date().toISOString();
+    const sources = [];
+    const seenSources = new Set();
+    const addSource = (name, type, url) => {
+        if (!name) return;
+        const dedupe = `${name}|${url || ""}`;
+        if (seenSources.has(dedupe)) return;
+        seenSources.add(dedupe);
+        const s = { name: String(name), type: type || "unknown" };
+        if (url) s.url = String(url);
+        sources.push(s);
+    };
+
+    // --- Breach exposure: category-level breach metadata only (no cred values) ---
+    const breachExposure = (Array.isArray(data.leaks) ? data.leaks : []).map(l => {
+        const exposed = Array.isArray(l.exposed_data)
+            ? l.exposed_data.filter(x => typeof x === "string")
+            : [];
+        const provenance = l.threat_actor_source || null;
+        if (provenance) addSource(provenance, "breach-source", null);
+        return {
+            name: l.leak_name || "Unknown Breach",
+            date: l.breach_date || null,
+            type: l.leak_type || null,
+            severity: l.severity || null,
+            exposedDataTypes: exposed,
+            source: provenance,
+            description: typeof l.description === "string" ? l.description : null
+        };
+    });
+
+    // --- Public account presence: only confirmed WhatsMyName matches ---
+    const matches = (wmnResults && Array.isArray(wmnResults.matches)) ? wmnResults.matches : [];
+    const publicAccounts = matches.map(m => {
+        if (m.url) addSource(m.platform || "WhatsMyName", "public-account", m.url);
+        return {
+            platform: m.platform || "Unknown",
+            category: m.category || null,
+            exists: true,
+            profileUrl: m.url || null,
+            confidence: typeof m.confidence_score === "number" ? m.confidence_score : null,
+            source: "WhatsMyName"
+        };
+    });
+
+    // --- Subject: investigation identifier(s) only, no discovered PII ---
+    const subject = { email: emp.corporate_email || currentEmail || null };
+    if (wmnResults && wmnResults.handle) subject.handle = String(wmnResults.handle);
+
+    return {
+        subject,
+        breachExposure,
+        publicAccounts,
+        sources,
+        metadata: {
+            generatedAt: nowIso,
+            reportVersion: EXPOSURE_REPORT_VERSION,
+            application: "BreachSpillover",
+            queryIdentifier: subject.email,
+            scope: "defensive-exposure-only",
+            breachCount: breachExposure.length,
+            publicAccountCount: publicAccounts.length
+        }
+    };
+}
+window.buildExposureReport = buildExposureReport;
+
+function exposureReportToMarkdown(report) {
+    const lines = [];
+    lines.push(`# Defensive Exposure Report`);
+    lines.push("");
+    lines.push(`**Subject:** ${report.subject.email || "N/A"}` + (report.subject.handle ? ` (handle: ${report.subject.handle})` : ""));
+    lines.push(`**Generated:** ${report.metadata.generatedAt}`);
+    lines.push(`**Report version:** ${report.metadata.reportVersion} · **Scope:** ${report.metadata.scope}`);
+    lines.push("");
+    lines.push(`## Breach Exposure (${report.breachExposure.length})`);
+    if (!report.breachExposure.length) {
+        lines.push("_No breach exposure returned by the application's legitimate sources._");
+    } else {
+        report.breachExposure.forEach(b => {
+            lines.push(`- **${b.name}**` + (b.date ? ` — ${b.date}` : "") + (b.type ? ` [${b.type}]` : "") + (b.severity ? ` (${b.severity})` : ""));
+            if (b.exposedDataTypes.length) lines.push(`  - Exposed data categories: ${b.exposedDataTypes.join(", ")}`);
+            if (b.source) lines.push(`  - Source: ${b.source}`);
+        });
+    }
+    lines.push("");
+    lines.push(`## Public Account Presence (${report.publicAccounts.length})`);
+    if (!report.publicAccounts.length) {
+        lines.push("_No public accounts confirmed (run a WhatsMyName scan to enrich)._");
+    } else {
+        report.publicAccounts.forEach(a => {
+            lines.push(`- **${a.platform}**` + (a.category ? ` [${a.category}]` : "") + (a.profileUrl ? ` — ${a.profileUrl}` : ""));
+        });
+    }
+    lines.push("");
+    lines.push(`## Sources (${report.sources.length})`);
+    if (!report.sources.length) {
+        lines.push("_None recorded._");
+    } else {
+        report.sources.forEach(s => lines.push(`- ${s.name} (${s.type})` + (s.url ? ` — ${s.url}` : "")));
+    }
+    lines.push("");
+    lines.push(`---`);
+    lines.push(`_Defensive exposure summary. Excludes credentials, residential/geolocation data, phone numbers, and relatives by design._`);
+    return lines.join("\n");
+}
+
+function sanitizeFilenamePart(str) {
+    return String(str || "target")
+        .replace(/[^a-zA-Z0-9._-]/g, "_")   // strip path/traversal/unsafe chars
+        .replace(/_+/g, "_")
+        .replace(/^[._]+|[._]+$/g, "")
+        .slice(0, 60) || "target";
+}
+
+function downloadBlob(content, mime, filename) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function exportExposureReport(format) {
+    playSound("click");
+    if (!currentInvestigationData) {
+        showToast("No active investigation to export.", "warning");
+        return;
+    }
+    try {
+        const report = buildExposureReport(currentInvestigationData, currentWMNResults);
+        if (!report.breachExposure.length && !report.publicAccounts.length) {
+            showToast("No exposure findings available to export yet.", "warning");
+            return;
+        }
+        const datePart = new Date().toISOString().slice(0, 10);
+        const slug = sanitizeFilenamePart(report.subject.email);
+        if (format === "md") {
+            downloadBlob(exposureReportToMarkdown(report), "text/markdown;charset=utf-8", `exposure_report_${slug}_${datePart}.md`);
+        } else {
+            downloadBlob(JSON.stringify(report, null, 2), "application/json", `exposure_report_${slug}_${datePart}.json`);
+        }
+        showActionTooltip("Exposure Report Exported");
+        showToast(`Defensive exposure report exported (${(format === "md" ? "Markdown" : "JSON")}).`, "success");
+        playSound("export");
+    } catch (err) {
+        console.error("Exposure export failed:", err);
+        showToast("Exposure report export failed: " + (err.message || err), "error");
+    }
+}
+window.exportExposureReport = exportExposureReport;
+
 /**
  * Action Tooltip Notification Helper
  */
@@ -912,6 +1158,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function initApp() {
     initTheme();
+    SoundManager.updateButtonUI();
     setupEventListeners();
     updateSearchInputTypeBadge();
     await loadGlobalStats();
@@ -1200,6 +1447,7 @@ function triggerSearch() {
         if (searchInput) searchInput.focus();
         return;
     }
+    playSound("click");
 
     // Check if input is a cryptographic hash (MD5, SHA-1, SHA-256)
     if (/^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$/.test(rawVal)) {
@@ -1726,6 +1974,7 @@ function addReconLog(streamEl, tag, tagClass, message, startTime) {
  * Execute investigation for a given email address with optional anchors
  */
 async function executeInvestigation(email) {
+    playSound("search");
     const standbyBox = document.getElementById("standby-status-box");
     if (standbyBox) standbyBox.style.display = "none";
 
@@ -4964,6 +5213,7 @@ window.pivotOnEntity = pivotOnEntity;
  * Toast notifications
  */
 function showToast(message, type = "info") {
+    if (type === "error") playSound("error");
     const container = document.getElementById("toast-container");
     if (!container) return;
 

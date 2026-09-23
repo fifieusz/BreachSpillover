@@ -120,9 +120,9 @@
 
                 <!-- Retro 8-Bit Pokémon SFX Toggle -->
                 <div class="sfx-header-control" title="Toggle 8-Bit Retro Pokémon Sound Effects">
-                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge" onclick="window.sfx && window.sfx.toggle()">
+                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge" onclick="window.SoundManager && window.SoundManager.toggle()">
                         <span id="sfx-toggle-icon">🔊</span>
-                        <span id="sfx-toggle-text">SFX: OFF</span>
+                        <span id="sfx-toggle-text">SOUND: ON</span>
                     </button>
                 </div>
 
@@ -436,6 +436,17 @@
                             <span class="mono text-[10px] text-zinc-500 uppercase tracking-wider">Deterministic Categorical Model</span>
                         </div>
                     </div>
+                </div>
+
+                <!-- Defensive Exposure Report Export (breach + public-account exposure only) -->
+                <div class="exposure-export-row" style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; padding:0.5rem 0 0.25rem;">
+                    <span class="mono text-[10px] text-zinc-500 uppercase tracking-wider">Defensive Exposure Report:</span>
+                    <button type="button" id="btn-exposure-json" class="btn-action-tool" onclick="exportExposureReport('json')" title="Export defensive exposure report (JSON): breach names/dates/categories and public account presence only. Excludes credentials, addresses, geolocation, phone, and relatives.">
+                        <span>Export JSON</span>
+                    </button>
+                    <button type="button" id="btn-exposure-md" class="btn-action-tool" onclick="exportExposureReport('md')" title="Export defensive exposure report (Markdown): breach names/dates/categories and public account presence only. Excludes credentials, addresses, geolocation, phone, and relatives.">
+                        <span>Export Report (MD)</span>
+                    </button>
                 </div>
 
                 <!-- 4-Pillar Hairline Bento Grid -->
