@@ -207,8 +207,8 @@ def build_identity_graph(
         # 2. Telecom pivots
         elif "PHONE" in p_type or "TELECOM" in p_type or "mobile" in c_note or "carrier" in c_note:
             telecom_pivots.append(piv)
-        # 3. Semantic Career, Education & Tech Competency pivots
-        elif p_type in ["EDUCATION", "WORKPLACE", "FLAGSHIP_PROJECT", "TECH_STACK", "CRYPTO_KEY", "PACKAGE_REGISTRY", "FULL_NAME", "NAME"]:
+        # 3. Semantic Career, Education, Co-Partners & Tech Competency pivots
+        elif p_type in ["EDUCATION", "WORKPLACE", "BUSINESS_ASSOCIATE", "FLAGSHIP_PROJECT", "TECH_STACK", "CRYPTO_KEY", "PACKAGE_REGISTRY", "FULL_NAME", "NAME"]:
             semantic_pivots.append(piv)
         elif p_type == "PERSONA_PIVOT":
             account_pivots.append(piv)
@@ -722,6 +722,10 @@ def build_identity_graph(
                 cat_tag = "RECURSIVE ALIAS"
                 acc_border = "#c084fc"
                 acc_bg = "#220930"
+            elif "gamertag" in p_val_low or "brawlhalla" in p_val_low or "esports" in p_val_low:
+                cat_tag = "ESPORTS: GAMERTAG"
+                acc_border = "#f59e0b"
+                acc_bg = "#261a06"
             else:
                 cat_tag = "REGISTERED ACCOUNT"
                 acc_border = "#c084fc"
@@ -1134,6 +1138,11 @@ def build_identity_graph(
                 s_border = "#f59e0b"
                 s_bg = "#261606"
                 edge_label = "EMPLOYED"
+            elif p_type == "BUSINESS_ASSOCIATE":
+                s_label = f"[CO-PARTNER: BUSINESS]\n{p_val}"
+                s_border = "#f59e0b"
+                s_bg = "#261606"
+                edge_label = "CO-FOUNDER"
             elif p_type == "FLAGSHIP_PROJECT":
                 s_label = f"[PROJECT: FLAGSHIP]\n{p_val}"
                 s_border = "#a855f7"

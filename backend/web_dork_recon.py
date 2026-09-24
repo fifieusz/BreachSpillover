@@ -10,6 +10,7 @@ COMPLETELY GENERIC: Zero hardcoded names, companies, or cities.
 import json
 import os
 import re
+import base64
 import urllib.parse
 import urllib.request
 from typing import Dict, Any, List, Optional, Set
@@ -265,18 +266,60 @@ def query_bing_search(query: str, max_results: int = 10) -> List[Dict[str, str]]
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9'
         })
-        with urllib.request.urlopen(req, timeout=3.5) as resp:
+        with urllib.request.urlopen(req, timeout=4.0) as resp:
             html = resp.read().decode('utf-8', errors='ignore')
-            
-        blocks = re.findall(r'<li class="b_algo".*?<h2>.*?<a href="([^"]+)".*?>(.*?)</a>.*?<p[^>]*>(.*?)</p>', html, re.DOTALL)
-        for href, raw_title, raw_snip in blocks[:max_results]:
-            title = re.sub(r'<[^>]+>', '', raw_title).strip()
-            snip = re.sub(r'<[^>]+>', '', raw_snip).strip()
-            if href and 'bing.com' not in href and 'microsoft.com' not in href:
+
+        html_low = html.lower()
+        if "searchnoresult" in html_low or "there are no results for" in html_low or "ingen resultater" in html_low or "ingen treff" in html_low:
+            return []
+
+        query_terms = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', query) if len(t) >= 3 and t.lower() not in ["site", "http", "https", "com", "www", "org", "net"]]
+
+        blocks = re.findall(r'<li class="b_algo"[^>]*>([\s\S]*?)</li>', html)
+        for b in blocks[:max_results]:
+            a_matches = re.findall(r'<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>', b)
+            target_url = None
+            title = None
+            snippet = ""
+
+            for href, text_content in a_matches:
+                clean_text = re.sub(r'<[^>]+>', '', text_content).strip()
+                clean_href = href.replace('&amp;', '&')
+
+                # Check if direct http URL
+                if clean_href.startswith('http') and 'bing.com' not in clean_href and 'microsoft.com' not in clean_href:
+                    target_url = clean_href
+                    title = clean_text
+                    break
+
+                # Decode Bing ck/a redirect
+                if 'bing.com/ck/a' in clean_href:
+                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(clean_href).query)
+                    u_param = qs.get('u', [''])[0]
+                    if u_param.startswith('a1'):
+                        b64 = u_param[2:]
+                        b64 += '=' * ((4 - len(b64) % 4) % 4)
+                        try:
+                            dec = base64.urlsafe_b64decode(b64).decode('utf-8', errors='ignore')
+                            if dec.startswith('http') and 'bing.com' not in dec and 'microsoft.com' not in dec:
+                                target_url = dec
+                                if clean_text and len(clean_text) > 3 and not clean_text.startswith('http'):
+                                    title = clean_text
+                        except Exception:
+                            pass
+
+            p_match = re.search(r'<p[^>]*>([\s\S]*?)</p>', b)
+            if p_match:
+                snippet = re.sub(r'<[^>]+>', '', p_match.group(1)).strip()
+
+            if target_url:
+                combined_txt = f"{title or ''} {target_url} {snippet}".lower()
+                if query_terms and not any(qt in combined_txt for qt in query_terms):
+                    continue
                 snippets.append({
-                    "title": title,
-                    "url": href,
-                    "snippet": snip
+                    "title": title or target_url,
+                    "url": target_url,
+                    "snippet": snippet
                 })
     except Exception:
         pass
@@ -286,13 +329,13 @@ def query_bing_search(query: str, max_results: int = 10) -> List[Dict[str, str]]
 def query_search_snippets(query: str, max_results: int = 10) -> List[Dict[str, str]]:
     """
     Executes a search request against public search endpoints and parses result URLs, titles, and descriptive snippets.
-    Combines DuckDuckGo Lite (for rich text snippets) and DuckDuckGo HTML (for extended web index).
+    Combines DuckDuckGo Lite, Bing Search, DuckDuckGo HTML, and Yahoo Search with resilient fallback.
     """
     global _DDG_FAILED_COUNT
     snippets: List[Dict[str, str]] = []
     seen_urls: Set[str] = set()
 
-    # Step 1: Query DuckDuckGo Lite first for rich un-truncated snippets
+    # Step 1: Query DuckDuckGo Lite
     lite_snips = query_duckduckgo_lite(query, max_results=max_results)
     for s in lite_snips:
         u = s.get("url")
@@ -300,64 +343,63 @@ def query_search_snippets(query: str, max_results: int = 10) -> List[Dict[str, s
             seen_urls.add(u)
             snippets.append(s)
 
-    if _DDG_FAILED_COUNT >= 2:
-        return snippets
-
-    # Step 2: POST to html.duckduckgo.com/html/ for extended index
-    try:
-        data = urllib.parse.urlencode({"q": query}).encode("utf-8")
-        req = urllib.request.Request(
-            "https://html.duckduckgo.com/html/",
-            data=data,
-            headers={
-                "User-Agent": USER_AGENT_DESKTOP,
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": "https://duckduckgo.com/",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9"
-            }
-        )
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
-
-        blocks = re.findall(r'<div class="result results_links[^"]*"[^>]*>(.*?)</div>\s*</div>', html, re.DOTALL)
-        for b in blocks[:max_results]:
-            title_m = re.search(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b)
-            snip_m = re.search(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', b, re.DOTALL)
-            clean_text = re.sub(r'<[^>]+>', ' ', b)
-            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-
-            if title_m:
-                raw_href = title_m.group(1)
-                qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_href).query)
-                clean_url = qs.get("uddg", [raw_href])[0]
-                title = re.sub(r'<[^>]+>', '', title_m.group(2)).strip()
-                snip = re.sub(r'<[^>]+>', '', snip_m.group(1)).strip() if snip_m else clean_text
-
-                if "duckduckgo.com" in clean_url or clean_url in seen_urls:
-                    continue
-
-                seen_urls.add(clean_url)
-                snippets.append({
-                    "title": title,
-                    "url": clean_url,
-                    "snippet": snip[:350]
-                })
-    except Exception:
-        pass
-
-    # Step 3: If DuckDuckGo failed or yielded < 2 results, fallback to Yahoo/Bing
-    if len(snippets) < 2:
-        yahoo_snips = query_yahoo_search(query, max_results=max_results)
-        for s in yahoo_snips:
+    # Step 2: Query Bing Search (decodes real target URLs and rich snippets)
+    if len(snippets) < max_results:
+        bing_snips = query_bing_search(query, max_results=max_results)
+        for s in bing_snips:
             u = s.get("url")
             if u and u not in seen_urls:
                 seen_urls.add(u)
                 snippets.append(s)
-                
-    if len(snippets) < 2:
-        bing_snips = query_bing_search(query, max_results=max_results)
-        for s in bing_snips:
+
+    # Step 3: DuckDuckGo HTML if still sparse
+    if len(snippets) < 3:
+        try:
+            data = urllib.parse.urlencode({"q": query}).encode("utf-8")
+            req = urllib.request.Request(
+                "https://html.duckduckgo.com/html/",
+                data=data,
+                headers={
+                    "User-Agent": USER_AGENT_DESKTOP,
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Referer": "https://duckduckgo.com/",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+
+            blocks = re.findall(r'<div class="result results_links[^"]*"[^>]*>(.*?)</div>\s*</div>', html, re.DOTALL)
+            for b in blocks[:max_results]:
+                title_m = re.search(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b)
+                snip_m = re.search(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', b, re.DOTALL)
+                clean_text = re.sub(r'<[^>]+>', ' ', b)
+                clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+
+                if title_m:
+                    raw_href = title_m.group(1)
+                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_href).query)
+                    clean_url = qs.get("uddg", [raw_href])[0]
+                    title = re.sub(r'<[^>]+>', '', title_m.group(2)).strip()
+                    snip = re.sub(r'<[^>]+>', '', snip_m.group(1)).strip() if snip_m else clean_text
+
+                    if "duckduckgo.com" in clean_url or clean_url in seen_urls:
+                        continue
+
+                    seen_urls.add(clean_url)
+                    snippets.append({
+                        "title": title,
+                        "url": clean_url,
+                        "snippet": snip[:350]
+                    })
+        except Exception:
+            pass
+
+    # Step 4: Yahoo Search fallback
+    if len(snippets) < 3:
+        yahoo_snips = query_yahoo_search(query, max_results=max_results)
+        for s in yahoo_snips:
             u = s.get("url")
             if u and u not in seen_urls:
                 seen_urls.add(u)
@@ -545,6 +587,7 @@ Respond ONLY with valid JSON in this exact structure:
 {{
   "is_corroborated": true,
   "confidence_score": 0.95,
+  "full_name_candidate": "Full verified legal or expanded name discovered (including middle names, e.g. 'Yasir Ashraf Kadim') or null",
   "location": {{
     "city": "Exact city name or null",
     "country": "Country name or null",
@@ -555,6 +598,7 @@ Respond ONLY with valid JSON in this exact structure:
     "job_title": "Role title or null",
     "context": "Evidence citation"
   }},
+  "phone_numbers": ["Discovered telephone or mobile numbers or empty list"],
   "profiles": [
     {{
       "platform": "LinkedIn / Facebook / Portfolio / Instagram / GitHub",
@@ -564,7 +608,7 @@ Respond ONLY with valid JSON in this exact structure:
     }}
   ]
 }}
-If no verified target data is corroborated, return {{"is_corroborated": false, "confidence_score": 0.0, "location": null, "workplace": null, "profiles": []}}."""
+If no verified target data is corroborated, return {{"is_corroborated": false, "confidence_score": 0.0, "full_name_candidate": null, "location": null, "workplace": null, "phone_numbers": [], "profiles": []}}."""
 
     try:
         res = call_groq_api(prompt, system_instruction, api_key, temperature=0.1, response_json=True)
@@ -665,8 +709,10 @@ def heuristic_fallback_disambiguation(
     result: Dict[str, Any] = {
         "is_corroborated": False,
         "confidence_score": 0.0,
+        "full_name_candidate": None,
         "location": None,
         "workplace": None,
+        "phone_numbers": [],
         "profiles": []
     }
 
@@ -685,6 +731,27 @@ def heuristic_fallback_disambiguation(
 
         result["is_corroborated"] = True
         result["confidence_score"] = max(result["confidence_score"], 0.88)
+
+        # Check for full legal name candidate with middle names (e.g. Yasir Ashraf Kadim)
+        if first_name and last_name:
+            prefix = last_name[:4] if len(last_name) >= 4 else last_name
+            full_pattern = re.compile(
+                rf'\b({re.escape(first_name)}\s+[A-Za-z]+(?:\s+[A-Za-z]+)*\s+{re.escape(prefix)}[a-z]*)\b',
+                re.IGNORECASE
+            )
+            name_m = full_pattern.search(f"{title} {snip}")
+            if name_m:
+                cand = " ".join(w.capitalize() for w in name_m.group(1).split())
+                if len(cand.split()) > len(target_name.split()):
+                    result["full_name_candidate"] = cand
+
+        # Check for phone numbers in snippet/title
+        phone_matches = re.findall(r'(?:\+|00)?(?:\d[\s.-]?){8,14}\d', f"{title} {snip}")
+        for pm in phone_matches:
+            clean_digits = re.sub(r'\D', '', pm)
+            if 8 <= len(clean_digits) <= 15:
+                if pm.strip() not in result["phone_numbers"]:
+                    result["phone_numbers"].append(pm.strip())
 
         # Check for residence / city mentions in snippets (e.g. Dutch: "ik woon in Wolvega", English: "Lives in Wolvega")
         nl_loc = re.search(r'(?:ik\s+woon\s+in|woonachtig\s+te|woonplaats:?)\s+([A-Z][a-z]+(?:[\s-][A-Z][a-z]+)?)', snip, re.IGNORECASE)
@@ -780,6 +847,10 @@ def execute_ai_dork_recon(
     if not target_name or len(target_name.strip()) < 3:
         return {"is_corroborated": False, "profiles": []}
 
+    name_parts = (target_name or "").strip().split()
+    first_name = name_parts[0].lower() if name_parts else ""
+    last_name = name_parts[-1].lower() if len(name_parts) >= 2 else ""
+
     local_part = target_email.split("@")[0].lower() if "@" in target_email else ""
     handles = [h.lower().strip() for h in (known_handles or []) if h]
     if local_part:
@@ -843,6 +914,7 @@ def execute_ai_dork_recon(
         f"{target_name} linkedin",
         f"{target_name} portfolio OR website",
         f"{target_name} company OR workplace OR employer",
+        f'"{target_name}" kvk OR vennoot OR partner OR director',
     ]
     if local_part and len(local_part) >= 4 and local_part != target_name.lower().replace(" ", ""):
         queries.append(f"{local_part}")
@@ -923,6 +995,9 @@ def execute_ai_dork_recon(
         if site_metadata.get("secondary_emails"):
             final_result["secondary_emails"] = site_metadata["secondary_emails"]
 
+        if site_metadata.get("phone_numbers"):
+            final_result.setdefault("phone_numbers", []).extend(site_metadata["phone_numbers"])
+
         if site_metadata.get("linkedin_url"):
             has_li = any("linkedin" in p.get("url", "") for p in final_result.get("profiles", []))
             if not has_li:
@@ -981,9 +1056,20 @@ def execute_ai_dork_recon(
                 inst_handle = clean_u.split("/")[-1].replace("@", "")
                 if last_name and (last_name in inst_handle or any(h in inst_handle for h in handles if len(h) >= 4)):
                     clean_profs.append(p)
+                elif any(h in inst_handle for h in handles if len(h) >= 4):
+                    clean_profs.append(p)
             else:
                 clean_profs.append(p)
         final_result["profiles"] = clean_profs
+
+    # Deduplicate phone numbers if present
+    if final_result and "phone_numbers" in final_result:
+        clean_phones = []
+        for ph in final_result["phone_numbers"]:
+            ph_clean = ph.strip()
+            if ph_clean and ph_clean not in clean_phones:
+                clean_phones.append(ph_clean)
+        final_result["phone_numbers"] = clean_phones
 
     if final_result and final_result.get("is_corroborated"):
         _DORK_CACHE[cache_key] = final_result

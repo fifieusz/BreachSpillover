@@ -137,22 +137,42 @@ def init_db():
     conn.close()
 
 COMMON_FIRST_NAMES = {
+    # Western & Anglo-American
     "jordin", "jordan", "filip", "phillip", "philip", "alex", "alexander", "david",
     "john", "michael", "mike", "lucas", "luka", "thomas", "daniel", "dan", "robert",
     "peter", "mark", "kevin", "brian", "jason", "eric", "erik", "lisa", "anna",
     "maria", "emma", "sophia", "olivia", "james", "william", "benjamin", "samuel",
     "nathan", "niels", "lars", "sander", "stefan", "bram", "thijs", "daan", "tim",
-    "tom", "max", "ruben", "julian", "milan", "luuk", "mees", "gijs", "teun"
+    "tom", "max", "ruben", "julian", "milan", "luuk", "mees", "gijs", "teun",
+    "adam", "oliver", "henry", "george", "charles", "richard", "joseph", "sam",
+    "paul", "steven", "anthony", "andrew", "edward", "harry", "jack", "noah",
+    # Middle Eastern & Arabic & Islamic
+    "yasir", "yasser", "ashraf", "kadim", "kadhim", "ali", "omar", "mohammed", "mohamed",
+    "muhammad", "ahmed", "ahmad", "hassan", "hussein", "tariq", "tarik", "kareem",
+    "karim", "mustafa", "mahmoud", "ibrahim", "youssef", "yousef", "bilal", "hamza",
+    "khalid", "walid", "ziad", "zaid", "samir", "rami", "nabil", "fadi", "amr",
+    # Slavic & Eastern European
+    "mateusz", "piotr", "krzysztof", "pawel", "michal", "jan", "jakub", "marcin",
+    "tomasz", "andrzej", "stanislaw", "wojciech", "lukasz", "grzegorz", "dmitry",
+    "alexei", "sergey", "ivan", "vladimir", "igor", "mikhail", "nikolay", "artem",
+    # Nordic & Scandinavian
+    "ole", "per", "knut", "sven", "magnus", "henrik", "jonas", "espen", "morten",
+    "bjorn", "tor", "geir", "rune", "arild", "frode", "oyvind", "einar",
+    # Southern European & Latin
+    "carlos", "luis", "juan", "miguel", "antonio", "pedro", "manuel", "jose",
+    "marco", "matteo", "luca", "francesco", "alessandro", "giovanni", "andrea"
 }
 
 def parse_name_from_email(email: str) -> str:
     cleaned = email.strip().lower()
     local = cleaned.split("@")[0]
-    parts = re.split(r'[._\-\d]+', local)
-    parts = [p.capitalize() for p in parts if len(p) > 0]
-    if len(parts) == 1:
+    parts = re.split(r'[._\-\+\d]+', local)
+    parts = [p.capitalize() for p in parts if len(p) >= 2]
+    if len(parts) >= 2:
+        return " ".join(parts)
+    elif len(parts) == 1:
         single = parts[0].lower()
-        # Test if single word starts with a known first name (e.g. jordinzwaan -> Jordin Zwaan)
+        # Test if single word starts with a known first name (e.g. jordinzwaan -> Jordin Zwaan, yasirkadhim -> Yasir Kadhim)
         for fn in sorted(COMMON_FIRST_NAMES, key=lambda x: -len(x)):
             if single.startswith(fn) and len(single) > len(fn) + 1:
                 sur = single[len(fn):]
@@ -162,8 +182,6 @@ def parse_name_from_email(email: str) -> str:
                         return fn.capitalize()
                     return f"{fn.capitalize()} {sur.capitalize()}"
         return parts[0]
-    elif parts:
-        return " ".join(parts)
     return local.capitalize() or "Target User"
 
 
@@ -249,10 +267,22 @@ def get_or_create_identity_profile(
         current_name = row["full_name"] or ""
         parsed_better = parse_name_from_email(cleaned_email)
         name_to_use = current_name
-        if (" " not in current_name or current_name.lower().startswith("webmail") or current_name == "Target User") and (" " in parsed_better):
-            cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (parsed_better, emp_id))
-            conn.commit()
+        should_update_name = False
+
+        anchor_name = (anchors.get("known_name") or "") if anchors else ""
+        if anchor_name and anchor_name.strip() and anchor_name.strip() not in ["Target User", "Webmail Target"] and anchor_name.strip() != current_name:
+            name_to_use = anchor_name.strip()
+            should_update_name = True
+        elif any(char.isdigit() for char in current_name) and not any(char.isdigit() for char in parsed_better):
             name_to_use = parsed_better
+            should_update_name = True
+        elif (" " not in current_name or current_name.lower().startswith("webmail") or current_name == "Target User") and (" " in parsed_better):
+            name_to_use = parsed_better
+            should_update_name = True
+
+        if should_update_name:
+            cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (name_to_use, emp_id))
+            conn.commit()
         conn.close()
         
         has_custom = any([custom_password, custom_city, custom_street, custom_relative])

@@ -110,19 +110,12 @@
                     </button>
                 </div>
 
-                <!-- Combolist Ingestion Modal Trigger -->
-                <div class="combolist-header-control" title="Ingest Custom Combolist / Breach Data">
-                    <button type="button" id="btn-combolist-modal" class="btn-declassify-badge" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" onclick="openCombolistModal()">
-                        <span class="status-btn-icon" style="background: #38bdf8; box-shadow: 0 0 8px #38bdf8;"></span>
-                        <span id="combolist-btn-text">INGEST COMBOLIST</span>
-                    </button>
-                </div>
 
                 <!-- Retro 8-Bit Pokémon SFX Toggle -->
                 <div class="sfx-header-control" title="Toggle 8-Bit Retro Pokémon Sound Effects">
-                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge" onclick="window.SoundManager && window.SoundManager.toggle()">
-                        <span id="sfx-toggle-icon">🔊</span>
-                        <span id="sfx-toggle-text">SOUND: ON</span>
+                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge" onclick="window.SoundManager ? window.SoundManager.toggle() : (window.sfx && window.sfx.toggle())">
+                        <span id="sfx-toggle-icon" class="mono text-xs">[SOUND]</span>
+                        <span id="sfx-toggle-text">ON</span>
                     </button>
                 </div>
 
@@ -189,13 +182,29 @@
                 </button>
             </form>
 
-            <!-- Deep Dive Reconnaissance Anchors Option -->
-            <div class="search-anchors-toggle-row">
-                <label class="search-checkbox-label" for="toggle-extra-intel">
-                    <input type="checkbox" id="toggle-extra-intel" onchange="toggleExtraIntelFields()">
-                    <span class="checkbox-custom"></span>
-                    <span class="checkbox-text font-mono text-[11px] tracking-wide text-zinc-400">Deep Dive Reconnaissance Anchors (Add known Name, Username/Handle, Phone, Location)</span>
-                </label>
+            <!-- Cockpit Forensic Tools & Deep Dive Reconnaissance Anchors Row -->
+            <div class="cockpit-tools-row">
+                <div class="search-anchors-toggle-wrapper">
+                    <label class="search-checkbox-label" for="toggle-extra-intel">
+                        <input type="checkbox" id="toggle-extra-intel" onchange="toggleExtraIntelFields()">
+                        <span class="checkbox-custom"></span>
+                        <span class="checkbox-text font-mono text-[11px] tracking-wide text-zinc-400">Deep Dive Reconnaissance Anchors (Add known Name, Username/Handle, Phone, Location)</span>
+                    </label>
+                </div>
+                <div class="cockpit-forensic-tools">
+                    <button type="button" id="btn-combolist-modal" class="btn-cockpit-tool btn-cockpit-blue" onclick="openCombolistModal()" title="Ingest Custom Combolist / Breach Data">
+                        <span class="cockpit-tool-dot"></span>
+                        <span id="combolist-btn-text">INGEST COMBOLIST</span>
+                    </button>
+                    <button type="button" id="btn-reverse-phone-modal" class="btn-cockpit-tool btn-cockpit-green" onclick="openReversePhoneModal()" title="Reverse Phone Number Lookup &amp; Carrier Detection">
+                        <span class="cockpit-tool-dot"></span>
+                        <span>REVERSE PHONE</span>
+                    </button>
+                    <button type="button" id="btn-image-recon-modal" class="btn-cockpit-tool btn-cockpit-purple" onclick="openImageCorrelationModal()" title="Visual Identity &amp; Avatar Correlation">
+                        <span class="cockpit-tool-dot"></span>
+                        <span>IMAGE CORRELATION</span>
+                    </button>
+                </div>
             </div>
             <div id="extra-intel-panel" class="extra-intel-panel" style="display: none;">
                 <div class="extra-intel-header">
@@ -595,6 +604,8 @@
                         <button type="button" class="tab-btn" data-tab="tab-telemetry">[TELEMETRY]</button>
                         <button type="button" class="tab-btn" data-tab="tab-dorks">[OSINT DORKS]</button>
                         <button type="button" class="tab-btn" data-tab="tab-wmn">[WMN ENUMERATION]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-images">[IMAGE CORRELATION]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-telecom">[REVERSE PHONE]</button>
                         <button type="button" class="tab-btn" data-tab="tab-pastes">[PASTE LEAKS]</button>
                         <button type="button" class="tab-btn" data-tab="tab-ai">[AI DOSSIER]</button>
                     </div>
@@ -639,6 +650,12 @@
                         </div>
                         <div id="tab-wmn" class="tab-pane">
                             <div id="tab-wmn-content"></div>
+                        </div>
+                        <div id="tab-images" class="tab-pane">
+                            <div id="tab-images-content"></div>
+                        </div>
+                        <div id="tab-telecom" class="tab-pane">
+                            <div id="tab-telecom-content"></div>
                         </div>
                         <div id="tab-pastes" class="tab-pane">
                             <div id="tab-pastes-content"></div>
@@ -931,6 +948,109 @@
                         <button type="button" id="btn-submit-combolist" class="btn-primary mono text-xs py-2 px-4" onclick="submitCombolistImport()">
                             Ingest &amp; Correlate &rarr;
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reverse Phone Number Search Modal -->
+    <div id="reverse-phone-modal" class="modal-backdrop" style="display: none;" onclick="handleReversePhoneModalBackdropClick(event)">
+        <div class="modal-dialog" style="max-width: 720px;">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <span class="modal-icon-badge mono text-emerald-400">[REVERSE TELECOM]</span>
+                    <div>
+                        <h3 class="modal-title tracking-tight">Reverse Phone Number Intelligence</h3>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono">
+                            E.164 normalization, carrier network identification, line classification, and national registry dispatch
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" onclick="closeReversePhoneModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 14px;">
+                    <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">TARGET PHONE NUMBER (ANY INTERNATIONAL FORMAT):</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="modal-phone-input" class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-sm" placeholder="e.g. +4791234567, 0701234567, +31612345678, +14155552671" onkeydown="if(event.key==='Enter') executeModalReversePhoneSearch()">
+                        <button type="button" id="btn-modal-phone-search" class="btn-primary mono text-xs py-2 px-4" onclick="executeModalReversePhoneSearch()">
+                            Analyze &rarr;
+                        </button>
+                    </div>
+                    <div style="display: flex; gap: 6px; margin-top: 6px; align-items: center; flex-wrap: wrap;">
+                        <span class="mono text-[11px] text-slate-500 dark:text-zinc-500">TEST PRESETS:</span>
+                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="setModalPhonePreset('+4791234567')">[NO] +47 912 34 567</button>
+                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="setModalPhonePreset('+31612345678')">[NL] +31 6 12345678</button>
+                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="setModalPhonePreset('+14155552671')">[US] +1 415 555 2671</button>
+                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="setModalPhonePreset('+48501234567')">[PL] +48 501 234 567</button>
+                    </div>
+                </div>
+
+                <div id="modal-phone-status" style="display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.78rem; margin-bottom: 12px;" class="mono"></div>
+
+                <div id="modal-phone-results" style="display: none; max-height: 480px; overflow-y: auto;">
+                    <!-- Dynamically populated via JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Correlation & Visual Comparison Modal -->
+    <div id="image-correlation-modal" class="modal-backdrop" style="display: none;" onclick="handleImageCorrelationModalBackdropClick(event)">
+        <div class="modal-dialog" style="max-width: 820px;">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <span class="modal-icon-badge mono text-purple-400">[IMAGE CORRELATION]</span>
+                    <div>
+                        <h3 class="modal-title tracking-tight">Visual Identity &amp; Cross-Platform Avatar Correlation</h3>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono">
+                            Harvested platform avatars, multi-engine reverse visual searches, and side-by-side identity verification
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" onclick="closeImageCorrelationModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Custom Image Reverse Search Launcher -->
+                <div style="background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+                    <label class="mono text-xs text-purple-400 block mb-1">REVERSE LOOKUP ARBITRARY IMAGE URL:</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="modal-custom-img-input" class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-xs" placeholder="https://example.com/avatar.jpg" onkeydown="if(event.key==='Enter') executeCustomImageReverseSearch()">
+                        <button type="button" class="btn-primary mono text-xs py-2 px-3" onclick="executeCustomImageReverseSearch()">
+                            Launch Lookups &rarr;
+                        </button>
+                    </div>
+                    <div id="modal-custom-img-links" style="display: none; margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px;"></div>
+                </div>
+
+                <!-- Harvested Target Avatars Section -->
+                <div style="margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span class="mono text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wide">HARVESTED TARGET AVATARS:</span>
+                        <span id="modal-avatar-count" class="badge-pill badge-clean mono">0 AVATARS</span>
+                    </div>
+                    <div id="modal-avatars-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;">
+                        <!-- Dynamically populated via JS -->
+                    </div>
+                </div>
+
+                <!-- Side-by-Side Visual Comparison Tool -->
+                <div id="modal-comparison-section" style="display: none; border-top: 1px solid var(--b-hairline); padding-top: 14px;">
+                    <div class="mono text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wide mb-2">
+                        SIDE-BY-SIDE VISUAL COMPARISON INSPECTOR:
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                        <div id="compare-pane-a" style="border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px; text-align: center; background: var(--c-canvas);">
+                            <div class="mono text-[11px] text-zinc-500 mb-2">IMAGE A (BASE PROFILE)</div>
+                            <img id="compare-img-a" src="" alt="Avatar A" style="max-height: 180px; max-width: 100%; border-radius: 6px; margin: 0 auto; display: block; object-fit: contain;">
+                            <div id="compare-meta-a" class="mono text-[11px] mt-2 text-zinc-400"></div>
+                        </div>
+                        <div id="compare-pane-b" style="border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px; text-align: center; background: var(--c-canvas);">
+                            <div class="mono text-[11px] text-zinc-500 mb-2">IMAGE B (CORRELATED PROFILE)</div>
+                            <img id="compare-img-b" src="" alt="Avatar B" style="max-height: 180px; max-width: 100%; border-radius: 6px; margin: 0 auto; display: block; object-fit: contain;">
+                            <div id="compare-meta-b" class="mono text-[11px] mt-2 text-zinc-400"></div>
+                        </div>
                     </div>
                 </div>
             </div>

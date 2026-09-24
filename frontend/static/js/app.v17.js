@@ -53,8 +53,8 @@ class RetroSoundEngine {
         const text = document.getElementById("sfx-toggle-text");
         const icon = document.getElementById("sfx-toggle-icon");
         if (btn) btn.classList.toggle("active", this.enabled);
-        if (text) text.innerText = this.enabled ? "SFX: ON" : "SFX: OFF";
-        if (icon) icon.innerText = this.enabled ? "🔊" : "🔇";
+        if (text) text.innerText = this.enabled ? "ON" : "OFF";
+        if (icon) icon.innerText = "[SOUND]";
     }
 
     // Classic Pokémon Menu A-Button Select (quick square blip)
@@ -191,8 +191,8 @@ const SoundManager = {
         const text = document.getElementById("sfx-toggle-text");
         const icon = document.getElementById("sfx-toggle-icon");
         const btn = document.getElementById("btn-sfx-toggle");
-        if (text) text.innerText = on ? "SOUND: ON" : "SOUND: OFF";
-        if (icon) icon.innerText = on ? "🔊" : "🔇";
+        if (text) text.innerText = on ? "ON" : "OFF";
+        if (icon) icon.innerText = "[SOUND]";
         if (btn) btn.classList.toggle("active", on);
     },
 
@@ -1209,6 +1209,9 @@ function setupEventListeners() {
             closeBatchModal();
             closeDomainReconModal();
             closeAISettingsModal();
+            if (typeof closeCombolistModal === "function") closeCombolistModal();
+            if (typeof closeReversePhoneModal === "function") closeReversePhoneModal();
+            if (typeof closeImageCorrelationModal === "function") closeImageCorrelationModal();
         }
     });
 
@@ -1236,6 +1239,12 @@ function setupEventListeners() {
             }
             if (targetId === "tab-pastes" && currentInvestigationData) {
                 renderPastesTab(currentInvestigationData);
+            }
+            if (targetId === "tab-images" && currentInvestigationData) {
+                renderImageCorrelationTab(currentInvestigationData);
+            }
+            if (targetId === "tab-telecom" && currentInvestigationData) {
+                renderTelecomTab(currentInvestigationData);
             }
         });
     });
@@ -3570,6 +3579,16 @@ window.highlightPlaybookStage = function(element) {
 
     // 13. AI Threat Intelligence Dossier
     renderAITab(data);
+
+    // 14. Image Correlation & Cross-Platform Avatars
+    if (typeof renderImageCorrelationTab === "function") {
+        renderImageCorrelationTab(data);
+    }
+
+    // 15. Reverse Phone & Telecom Intelligence
+    if (typeof renderTelecomTab === "function") {
+        renderTelecomTab(data);
+    }
 }
 
 function renderDorksTab(data) {
@@ -5987,4 +6006,757 @@ window.executeTelecomLookup = function() {
     const q = input ? input.value.trim() : "";
     switchTelecomCountry("GLOBAL", q, null);
 };
+
+/* ==========================================================================
+   Reverse Phone Number Intelligence Engine & Modal Controllers
+   ========================================================================== */
+
+function openReversePhoneModal(presetPhone = "") {
+    if (window.sfx) window.sfx.playSelect();
+    const modal = document.getElementById("reverse-phone-modal");
+    const input = document.getElementById("modal-phone-input");
+    if (modal) modal.style.display = "flex";
+    if (input) {
+        if (presetPhone) {
+            input.value = presetPhone;
+            executeModalReversePhoneSearch();
+        } else if (!input.value.trim() && currentInvestigationData) {
+            const emp = currentInvestigationData.employee || {};
+            const p = emp.phone_number || emp.phone || "";
+            if (p) {
+                input.value = p;
+                executeModalReversePhoneSearch();
+            }
+        }
+        input.focus();
+    }
+}
+
+function closeReversePhoneModal() {
+    const modal = document.getElementById("reverse-phone-modal");
+    if (modal) modal.style.display = "none";
+}
+
+function handleReversePhoneModalBackdropClick(event) {
+    if (event.target && event.target.id === "reverse-phone-modal") {
+        closeReversePhoneModal();
+    }
+}
+
+function setModalPhonePreset(val) {
+    const input = document.getElementById("modal-phone-input");
+    if (input) input.value = val;
+    executeModalReversePhoneSearch();
+}
+
+async function executeModalReversePhoneSearch() {
+    const input = document.getElementById("modal-phone-input");
+    const status = document.getElementById("modal-phone-status");
+    const results = document.getElementById("modal-phone-results");
+    if (!input) return;
+
+    const query = input.value.trim();
+    if (!query) {
+        if (status) {
+            status.style.display = "block";
+            status.style.background = "rgba(239, 68, 68, 0.1)";
+            status.style.color = "#f87171";
+            status.style.border = "1px solid rgba(239, 68, 68, 0.3)";
+            status.innerText = "Please enter a target phone number.";
+        }
+        return;
+    }
+
+    if (status) {
+        status.style.display = "block";
+        status.style.background = "rgba(16, 185, 129, 0.08)";
+        status.style.color = "#34d399";
+        status.style.border = "1px solid rgba(16, 185, 129, 0.3)";
+        status.innerText = `Analyzing telecom carrier, E.164 normalization, and national registries for ${query}...`;
+    }
+    if (results) {
+        results.style.display = "none";
+        results.innerHTML = "";
+    }
+
+    try {
+        const resp = await fetch(`/api/recon/reverse-phone?phone=${encodeURIComponent(query)}`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || "Lookup request failed");
+        }
+        const data = await resp.json();
+        if (status) status.style.display = "none";
+        if (results) {
+            results.style.display = "block";
+            renderReversePhoneDossier(data, results);
+        }
+    } catch (e) {
+        if (status) {
+            status.style.display = "block";
+            status.style.background = "rgba(239, 68, 68, 0.1)";
+            status.style.color = "#f87171";
+            status.style.border = "1px solid rgba(239, 68, 68, 0.3)";
+            status.innerText = `Error: ${e.message}`;
+        }
+    }
+}
+
+function renderReversePhoneDossier(d, container) {
+    if (!container || !d) return;
+
+    const safeE164 = escapeHtml(d.e164 || d.raw_query || "");
+    const safeCarrier = escapeHtml(d.carrier || "Standard Cellular Network");
+    const safeType = escapeHtml(d.line_type || "Mobile / Cellular");
+    const safeCountry = escapeHtml(d.country || "International");
+    const safeIso = escapeHtml(d.country_iso || "GLOBAL");
+    const safeGeo = escapeHtml(d.geographic_location || safeCountry);
+    const msgs = d.messaging_shortcuts || {};
+    const dirs = d.directories || [];
+    const correlations = d.database_correlations || [];
+
+    let html = `
+        <div style="background: var(--c-surface); border: 1px solid var(--b-hairline); border-radius: 6px; padding: 14px; margin-top: 10px;">
+            <!-- Header Grid: Identity & Telecom Matrix -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--b-hairline);">
+                <div>
+                    <div class="mono text-[10px] text-zinc-500 uppercase tracking-wider">E.164 IDENTITY</div>
+                    <div class="mono text-base font-bold text-emerald-400">${safeE164}</div>
+                    <div class="mono text-[11px] text-zinc-400">${escapeHtml(d.international_format || safeE164)}</div>
+                </div>
+                <div>
+                    <div class="mono text-[10px] text-zinc-500 uppercase tracking-wider">LINE TYPE</div>
+                    <div class="mono text-sm font-semibold text-zinc-200">${safeType}</div>
+                    <div class="mono text-[11px] text-zinc-400">Validity: ${d.is_valid ? '<span class="text-emerald-400 font-bold">VERIFIED VALID</span>' : '<span class="text-amber-400">UNCONFIRMED</span>'}</div>
+                </div>
+                <div>
+                    <div class="mono text-[10px] text-zinc-500 uppercase tracking-wider">CARRIER / NETWORK</div>
+                    <div class="mono text-sm font-semibold text-sky-400">${safeCarrier}</div>
+                    <div class="mono text-[11px] text-zinc-400">${safeGeo}</div>
+                </div>
+                <div>
+                    <div class="mono text-[10px] text-zinc-500 uppercase tracking-wider">JURISDICTION</div>
+                    <div class="mono text-sm font-semibold text-zinc-200">${safeCountry} [${safeIso}]</div>
+                    <div class="mono text-[11px] text-zinc-400">Dialing Prefix: ${escapeHtml(d.country_prefix || "")}</div>
+                </div>
+            </div>
+
+            <!-- Direct Messaging Links -->
+            <div style="margin-bottom: 14px;">
+                <div class="mono text-[10px] text-zinc-500 uppercase tracking-wider mb-2">DIRECT MESSAGING &amp; CHAT PLATFORM ACTIONS:</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    ${msgs.whatsapp ? `
+                        <a href="${escapeHtml(msgs.whatsapp)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1.5 px-3" style="color: #22c55e; border-color: rgba(34, 197, 94, 0.4); text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                            <span>WhatsApp wa.me</span> &nearr;
+                        </a>
+                    ` : ''}
+                    ${msgs.telegram ? `
+                        <a href="${escapeHtml(msgs.telegram)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1.5 px-3" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                            <span>Telegram Direct</span> &nearr;
+                        </a>
+                    ` : ''}
+                    ${msgs.viber ? `
+                        <a href="${escapeHtml(msgs.viber)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1.5 px-3" style="color: #a855f7; border-color: rgba(168, 85, 247, 0.4); text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                            <span>Viber Chat</span> &nearr;
+                        </a>
+                    ` : ''}
+                    <button type="button" class="btn-tool text-xs py-1.5 px-3" onclick="navigator.clipboard.writeText('${safeE164}'); showToast('E.164 copied to clipboard', 'success');">
+                        Copy E.164
+                    </button>
+                </div>
+            </div>
+    `;
+
+    // Database correlations
+    if (correlations.length > 0) {
+        html += `
+            <div style="margin-bottom: 14px; background: rgba(244, 63, 94, 0.06); border: 1px solid rgba(244, 63, 94, 0.25); border-radius: 6px; padding: 10px 12px;">
+                <div class="mono text-xs font-bold text-rose-400 mb-1.5 uppercase">LOCAL DATABASE CORRELATION MATCHES (${correlations.length}):</div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+        `;
+        correlations.forEach(c => {
+            html += `
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem;" class="mono">
+                    <span style="color: var(--t-primary); font-weight: 600;">${escapeHtml(c.full_name || 'Unknown')} (${escapeHtml(c.corporate_email || '')})</span>
+                    <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="closeReversePhoneModal(); loadExampleTarget('${escapeHtml(c.corporate_email)}')">Inspect Target &rarr;</button>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+
+    // Authoritative National Directories
+    if (dirs.length > 0) {
+        html += `
+            <div>
+                <div class="mono text-[10px] text-zinc-500 uppercase tracking-wider mb-2">AUTHORITATIVE NATIONAL DIRECTORIES &amp; CALLER ID DISPATCHERS:</div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px;">
+        `;
+        dirs.forEach(d => {
+            html += `
+                <div class="evidence-card" style="margin: 0; padding: 10px 12px; background: var(--c-elevated); border: 1px solid var(--b-hairline); display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span class="mono font-bold text-xs" style="color: var(--t-primary);">${escapeHtml(d.name)}</span>
+                            <span class="mono text-[10px] px-1 py-0.5 rounded" style="background: var(--c-surface); border: 1px solid var(--b-hairline); color: var(--t-secondary);">${escapeHtml(d.badge)}</span>
+                        </div>
+                        <div style="font-size: 0.72rem; color: #94a3b8; line-height: 1.4; margin-bottom: 8px;">
+                            ${escapeHtml(d.description)}
+                        </div>
+                    </div>
+                    <div>
+                        <a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[11px] py-1 px-2.5" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                            Launch Directory &nearr;
+                        </a>
+                    </div>
+                </div>
+            `;
+        });
+        html += `</div></div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+function renderTelecomTab(data) {
+    const container = document.getElementById("tab-telecom-content");
+    if (!container) return;
+
+    const emp = (data && data.employee) ? data.employee : {};
+    const pivots = (data && data.pivots) ? data.pivots : [];
+    const directPhone = emp.phone_number || emp.phone || "";
+    
+    // Extract any phone numbers from pivots
+    const phonePivots = pivots.filter(p => p.pivot_type === "PHONE" || p.pivot_type === "PHONE_NUMBER");
+    const uniquePhones = new Set();
+    if (directPhone) uniquePhones.add(directPhone);
+    phonePivots.forEach(p => {
+        if (p.pivot_value) uniquePhones.add(p.pivot_value);
+    });
+
+    const phoneList = Array.from(uniquePhones);
+
+    let html = `
+        <div class="evidence-card" style="border-left: 3px solid #10b981; margin-bottom: 14px; background: rgba(16, 185, 129, 0.04);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+                <div class="evidence-title flex items-center gap-1.5" style="color: #34d399; font-size: 0.95rem;">
+                    ${getUiIcon("globe", "w-4 h-4 text-emerald-400")} REVERSE PHONE NUMBER &amp; TELECOM INTELLIGENCE
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span class="badge-pill mono" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+                        ${phoneList.length} TELECOM VECTOR${phoneList.length === 1 ? '' : 'S'}
+                    </span>
+                    <button type="button" class="btn-tool" onclick="openReversePhoneModal()" style="color: #34d399; border-color: rgba(16, 185, 129, 0.4); font-size: 0.72rem; padding: 3px 8px;">
+                        [OPEN REVERSE LOOKUP TOOL]
+                    </button>
+                </div>
+            </div>
+            <div style="font-size: 0.78rem; color: #94a3b8; line-height: 1.5; margin-bottom: 12px;">
+                E.164 normalization, carrier identification, line type classification (Mobile / Landline / VoIP), direct messaging platform pivots (WhatsApp, Telegram), and dispatch to authoritative national citizen directories.
+            </div>
+
+            <!-- Ad-hoc Reverse Phone Search Form -->
+            <div style="display: flex; gap: 8px; background: var(--c-elevated); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--b-hairline); align-items: center; margin-bottom: 10px;">
+                <span class="mono text-[11px] text-zinc-400" style="white-space: nowrap;">LOOKUP PHONE:</span>
+                <input type="text" id="tab-custom-phone-input" placeholder="e.g. +4791234567, 0701234567, +31612345678, +14155552671" class="terminal-input" style="flex: 1; padding: 5px 8px; font-size: 0.78rem; background: var(--c-input); border: 1px solid var(--b-subtle); border-radius: 4px; color: var(--t-primary);" onkeydown="if(event.key==='Enter') executeTabReversePhoneSearch()">
+                <button type="button" class="btn-tool" onclick="executeTabReversePhoneSearch()" style="color: #10b981; border-color: #059669; font-size: 0.74rem; padding: 5px 10px;">
+                    Analyze Telecom &rarr;
+                </button>
+            </div>
+            <div id="tab-reverse-phone-status" style="display: none; padding: 6px 10px; border-radius: 4px; font-size: 0.75rem; margin-bottom: 8px;" class="mono"></div>
+            <div id="tab-reverse-phone-results" style="display: none; margin-bottom: 12px;"></div>
+        </div>
+    `;
+
+    // Detected Target Phones Section
+    if (phoneList.length > 0) {
+        html += `
+            <div style="margin-bottom: 16px;">
+                <div class="mono text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wide mb-2">
+                    IDENTIFIED TARGET PHONE VECTORS (${phoneList.length}):
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px;">
+        `;
+
+        phoneList.forEach(ph => {
+            const safePhone = escapeHtml(ph);
+            html += `
+                <div class="evidence-card" style="margin: 0; padding: 12px; background: var(--c-elevated); border: 1px solid var(--b-hairline); display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                            <span class="mono font-bold text-sm text-emerald-400">${safePhone}</span>
+                            <span class="badge-pill mono" style="font-size: 0.65rem; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                TARGET PHONE
+                            </span>
+                        </div>
+                        <div class="mono text-[11px] text-zinc-400 mb-3">
+                            Associated with target ${escapeHtml(emp.full_name || currentEmail)}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button type="button" class="btn-tool text-[10px] py-1 px-2.5" onclick="executeTabReversePhoneDirect('${safePhone}')" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
+                            Full Reverse Scan &rarr;
+                        </button>
+                        <button type="button" class="btn-tool text-[10px] py-1 px-2.5" onclick="openReversePhoneModal('${safePhone}')">
+                            Open Modal
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `</div></div>`;
+    }
+
+    container.innerHTML = html;
+
+    // Embed Multi-Country National Telecom Router
+    const subContainer = document.createElement("div");
+    subContainer.id = "tab-telecom-router-box";
+    container.appendChild(subContainer);
+
+    renderMultiCountryTelecomSection(data, subContainer);
+}
+
+async function executeTabReversePhoneSearch() {
+    const input = document.getElementById("tab-custom-phone-input");
+    const status = document.getElementById("tab-reverse-phone-status");
+    const results = document.getElementById("tab-reverse-phone-results");
+    if (!input) return;
+
+    const query = input.value.trim();
+    if (!query) {
+        if (status) {
+            status.style.display = "block";
+            status.style.background = "rgba(239, 68, 68, 0.1)";
+            status.style.color = "#f87171";
+            status.style.border = "1px solid rgba(239, 68, 68, 0.3)";
+            status.innerText = "Please enter a target phone number.";
+        }
+        return;
+    }
+
+    if (status) {
+        status.style.display = "block";
+        status.style.background = "rgba(16, 185, 129, 0.08)";
+        status.style.color = "#34d399";
+        status.style.border = "1px solid rgba(16, 185, 129, 0.3)";
+        status.innerText = `Analyzing telecom carrier, E.164 normalization, and national registries for ${query}...`;
+    }
+    if (results) {
+        results.style.display = "none";
+        results.innerHTML = "";
+    }
+
+    try {
+        const resp = await fetch(`/api/recon/reverse-phone?phone=${encodeURIComponent(query)}`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || "Lookup request failed");
+        }
+        const data = await resp.json();
+        if (status) status.style.display = "none";
+        if (results) {
+            results.style.display = "block";
+            renderReversePhoneDossier(data, results);
+        }
+    } catch (e) {
+        if (status) {
+            status.style.display = "block";
+            status.style.background = "rgba(239, 68, 68, 0.1)";
+            status.style.color = "#f87171";
+            status.style.border = "1px solid rgba(239, 68, 68, 0.3)";
+            status.innerText = `Error: ${e.message}`;
+        }
+    }
+}
+
+function executeTabReversePhoneDirect(phone) {
+    const input = document.getElementById("tab-custom-phone-input");
+    if (input) input.value = phone;
+    executeTabReversePhoneSearch();
+}
+
+window.openReversePhoneModal = openReversePhoneModal;
+window.closeReversePhoneModal = closeReversePhoneModal;
+window.handleReversePhoneModalBackdropClick = handleReversePhoneModalBackdropClick;
+window.setModalPhonePreset = setModalPhonePreset;
+window.executeModalReversePhoneSearch = executeModalReversePhoneSearch;
+window.renderReversePhoneDossier = renderReversePhoneDossier;
+window.renderTelecomTab = renderTelecomTab;
+window.executeTabReversePhoneSearch = executeTabReversePhoneSearch;
+window.executeTabReversePhoneDirect = executeTabReversePhoneDirect;
+
+/* ==========================================================================
+   Image Correlation & Reverse Visual Search Engine Controllers
+   ========================================================================== */
+
+function openImageCorrelationModal() {
+    if (window.sfx) window.sfx.playSelect();
+    const modal = document.getElementById("image-correlation-modal");
+    if (!modal) return;
+    modal.style.display = "flex";
+
+    // Populate harvested avatars in modal
+    const grid = document.getElementById("modal-avatars-grid");
+    const countBadge = document.getElementById("modal-avatar-count");
+    const images = (currentInvestigationData && currentInvestigationData.images) ? currentInvestigationData.images : [];
+
+    if (countBadge) {
+        countBadge.innerText = `${images.length} AVATAR${images.length === 1 ? '' : 'S'}`;
+    }
+
+    if (grid) {
+        if (images.length === 0) {
+            grid.innerHTML = `
+                <div style="grid-column: 1 / -1; padding: 20px; text-align: center; color: #94a3b8; font-size: 0.8rem;" class="mono">
+                    No avatars harvested for current target identity. Paste an image URL above to generate 1-click reverse search queries.
+                </div>
+            `;
+        } else {
+            let html = "";
+            images.forEach(img => {
+                const imgUrl = img.image_url || img.thumbnail_url || "";
+                const safeUrl = escapeHtml(imgUrl);
+                const platform = escapeHtml(img.platform || "Web Asset");
+                const label = escapeHtml(img.label || img.source || "Target Avatar");
+                const revLinks = img.reverse_search_links || {};
+
+                html += `
+                    <div style="background: var(--c-surface); border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <span class="mono text-xs font-bold text-purple-400">${platform}</span>
+                                <span class="mono text-[10px] px-1 py-0.5 rounded" style="background: var(--c-canvas); border: 1px solid var(--b-hairline); color: var(--t-secondary);">${escapeHtml(img.badge || "PUBLIC")}</span>
+                            </div>
+                            <div style="text-align: center; margin-bottom: 8px; background: var(--c-canvas); border-radius: 4px; padding: 6px;">
+                                <img src="${safeUrl}" alt="${platform}" style="max-height: 120px; max-width: 100%; border-radius: 4px; object-fit: contain; margin: 0 auto; display: block;" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'80\\' height=\\'80\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'%2364748b\\' stroke-width=\\'1.5\\'%3E%3Crect x=\\'3\\' y=\\'3\\' width=\\'18\\' height=\\'18\\' rx=\\'2\\'/%3E%3Ccircle cx=\\'8.5\\' cy=\\'8.5\\' r=\\'1.5\\'/%3E%3Cpolyline points=\\'21 15 16 10 5 21\\'/%3E%3C/svg%3E';">
+                            </div>
+                            <div class="mono text-[11px] font-semibold text-zinc-300 mb-1" style="word-break: break-all;">${label}</div>
+                        </div>
+                        <div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;">
+                                ${revLinks.google_lens ? `<a href="${escapeHtml(revLinks.google_lens)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #38bdf8; text-decoration: none;">Lens &nearr;</a>` : ''}
+                                ${revLinks.yandex_images ? `<a href="${escapeHtml(revLinks.yandex_images)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #fb923c; text-decoration: none;">Yandex &nearr;</a>` : ''}
+                                ${revLinks.tineye ? `<a href="${escapeHtml(revLinks.tineye)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #34d399; text-decoration: none;">TinEye &nearr;</a>` : ''}
+                                ${revLinks.bing_visual ? `<a href="${escapeHtml(revLinks.bing_visual)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #818cf8; text-decoration: none;">Bing &nearr;</a>` : ''}
+                                ${revLinks.pimeyes ? `<a href="${escapeHtml(revLinks.pimeyes)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #f43f5e; text-decoration: none;">PimEyes &nearr;</a>` : ''}
+                            </div>
+                            <div style="display: flex; gap: 4px; border-top: 1px solid var(--b-hairline); padding-top: 6px;">
+                                <button type="button" class="btn-tool text-[10px] flex-1 py-1" onclick="setupModalVisualCompare('A', '${safeUrl}', '${platform} - ${label}')">[COMPARE A]</button>
+                                <button type="button" class="btn-tool text-[10px] flex-1 py-1" onclick="setupModalVisualCompare('B', '${safeUrl}', '${platform} - ${label}')">[COMPARE B]</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            grid.innerHTML = html;
+        }
+    }
+}
+
+function closeImageCorrelationModal() {
+    const modal = document.getElementById("image-correlation-modal");
+    if (modal) modal.style.display = "none";
+}
+
+function handleImageCorrelationModalBackdropClick(event) {
+    if (event.target && event.target.id === "image-correlation-modal") {
+        closeImageCorrelationModal();
+    }
+}
+
+async function executeCustomImageReverseSearch() {
+    const input = document.getElementById("modal-custom-img-input");
+    const linksContainer = document.getElementById("modal-custom-img-links");
+    if (!input || !linksContainer) return;
+
+    const url = input.value.trim();
+    if (!url) {
+        showToast("Please enter an image URL.", "warning");
+        return;
+    }
+
+    linksContainer.style.display = "flex";
+    linksContainer.innerHTML = `<span class="mono text-xs text-purple-400">Generating query links for visual search engines...</span>`;
+
+    try {
+        const resp = await fetch("/api/recon/reverse-image-urls", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image_url: url })
+        });
+        const data = await resp.json();
+        const links = data.reverse_search_links || {};
+
+        let html = "";
+        if (links.google_lens) html += `<a href="${escapeHtml(links.google_lens)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); text-decoration: none;">Google Lens &nearr;</a>`;
+        if (links.yandex_images) html += `<a href="${escapeHtml(links.yandex_images)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #fb923c; border-color: rgba(251, 146, 60, 0.4); text-decoration: none;">Yandex Visual &nearr;</a>`;
+        if (links.tineye) html += `<a href="${escapeHtml(links.tineye)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #34d399; border-color: rgba(52, 211, 153, 0.4); text-decoration: none;">TinEye &nearr;</a>`;
+        if (links.bing_visual) html += `<a href="${escapeHtml(links.bing_visual)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #818cf8; border-color: rgba(129, 140, 248, 0.4); text-decoration: none;">Bing Visual &nearr;</a>`;
+        if (links.pimeyes) html += `<a href="${escapeHtml(links.pimeyes)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #f43f5e; border-color: rgba(244, 63, 94, 0.4); text-decoration: none;">PimEyes &nearr;</a>`;
+
+        linksContainer.innerHTML = html;
+    } catch (e) {
+        linksContainer.innerHTML = `<span class="mono text-xs text-rose-400">Error: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+function setupModalVisualCompare(slot, imgUrl, label) {
+    const sec = document.getElementById("modal-comparison-section");
+    if (sec) sec.style.display = "block";
+
+    if (slot === "A") {
+        const imgA = document.getElementById("compare-img-a");
+        const metaA = document.getElementById("compare-meta-a");
+        if (imgA) imgA.src = imgUrl;
+        if (metaA) metaA.innerText = label;
+        showToast("Set as Base Image A", "info");
+    } else {
+        const imgB = document.getElementById("compare-img-b");
+        const metaB = document.getElementById("compare-meta-b");
+        if (imgB) imgB.src = imgUrl;
+        if (metaB) metaB.innerText = label;
+        showToast("Set as Candidate Image B", "info");
+    }
+}
+
+function renderImageCorrelationTab(data) {
+    const container = document.getElementById("tab-images-content");
+    if (!container) return;
+
+    const images = (data && data.images) ? data.images : [];
+    const emp = (data && data.employee) ? data.employee : {};
+    const email = emp.corporate_email || currentEmail || "";
+    const name = emp.full_name || "";
+
+    let html = `
+        <div class="evidence-card" style="border-left: 3px solid #a855f7; margin-bottom: 14px; background: rgba(168, 85, 247, 0.04);">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+                <div class="evidence-title flex items-center gap-1.5" style="color: #c084fc; font-size: 0.95rem;">
+                    ${getUiIcon("user", "w-4 h-4 text-purple-400")} VISUAL IDENTITY &amp; AVATAR HARVESTING
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span class="badge-pill mono" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">
+                        ${images.length} HARVESTED AVATAR${images.length === 1 ? '' : 'S'}
+                    </span>
+                    <button type="button" class="btn-tool" onclick="openImageCorrelationModal()" style="color: #c084fc; border-color: rgba(168, 85, 247, 0.4); font-size: 0.72rem; padding: 3px 8px;">
+                        [OPEN VISUAL WORKSPACE]
+                    </button>
+                </div>
+            </div>
+            <div style="font-size: 0.78rem; color: #94a3b8; line-height: 1.5; margin-bottom: 12px;">
+                Automated multi-platform avatar discovery across Gravatar (MD5 hash), GitHub Developer avatars, Duolingo, and verified web profiles. Launch 1-click reverse visual lookups across Google Lens, Yandex, TinEye, Bing Visual, and PimEyes.
+            </div>
+
+            <!-- Ad-hoc Reverse Lookup Bar -->
+            <div style="display: flex; gap: 8px; background: var(--c-elevated); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--b-hairline); align-items: center; margin-bottom: 10px;">
+                <span class="mono text-[11px] text-zinc-400" style="white-space: nowrap;">QUICK REVERSE LOOKUP:</span>
+                <input type="text" id="tab-custom-img-input" placeholder="Paste any image URL (https://.../avatar.jpg)" class="terminal-input" style="flex: 1; padding: 5px 8px; font-size: 0.78rem; background: var(--c-input); border: 1px solid var(--b-subtle); border-radius: 4px; color: var(--t-primary);" onkeydown="if(event.key==='Enter') executeTabCustomImageReverseSearch()">
+                <button type="button" class="btn-tool" onclick="executeTabCustomImageReverseSearch()" style="color: #a855f7; border-color: #9333ea; font-size: 0.74rem; padding: 5px 10px;">
+                    Search Engines &rarr;
+                </button>
+            </div>
+            <div id="tab-custom-img-engines" style="display: none; margin-bottom: 10px; flex-wrap: wrap; gap: 6px;"></div>
+        </div>
+    `;
+
+    if (images.length === 0) {
+        html += `
+            <div class="evidence-card" style="border-left: 3px solid #64748b; padding: 20px; text-align: center;">
+                <div class="mono text-xs text-zinc-400 mb-2">No public avatars automatically discovered for ${escapeHtml(email || 'target')}</div>
+                <div class="text-xs text-zinc-500 mb-3">Target may use customized privacy settings or non-standard image hosts. Paste an image URL above to correlate manually, or re-run image probe.</div>
+                <button type="button" class="btn-tool" onclick="refreshTargetImages('${escapeHtml(email)}', '${escapeHtml(name)}')" style="color: #38bdf8; border-color: #0284c7; font-size: 0.75rem; padding: 4px 12px; margin: 0 auto; display: inline-block;">
+                    Re-Probe Image Profiles
+                </button>
+            </div>
+        `;
+    } else {
+        html += `
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 16px;">
+        `;
+
+        images.forEach((img) => {
+            const revLinks = img.reverse_search_links || {};
+            const imgUrl = img.image_url || img.thumbnail_url || "";
+            const safeUrl = escapeHtml(imgUrl);
+            const platform = escapeHtml(img.platform || "Web Asset");
+            const label = escapeHtml(img.label || img.source || "Target Avatar");
+            const badge = escapeHtml(img.badge || "PUBLIC");
+
+            html += `
+                <div class="evidence-card" style="margin: 0; padding: 12px; background: var(--c-elevated); border: 1px solid var(--b-hairline); display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                            <span class="mono font-bold text-xs" style="color: #c084fc;">${platform}</span>
+                            <span class="mono text-[10px] px-1.5 py-0.5 rounded" style="background: var(--c-surface); border: 1px solid var(--b-hairline); color: var(--t-secondary);">${badge}</span>
+                        </div>
+                        <div style="text-align: center; margin-bottom: 10px; background: var(--c-canvas); border-radius: 6px; padding: 8px; border: 1px solid var(--b-hairline);">
+                            <img src="${safeUrl}" alt="${platform}" style="max-height: 140px; max-width: 100%; border-radius: 4px; object-fit: contain; margin: 0 auto; display: block;" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'80\\' height=\\'80\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'%2364748b\\' stroke-width=\\'1.5\\'%3E%3Crect x=\\'3\\' y=\\'3\\' width=\\'18\\' height=\\'18\\' rx=\\'2\\'/%3E%3Ccircle cx=\\'8.5\\' cy=\\'8.5\\' r=\\'1.5\\'/%3E%3Cpolyline points=\\'21 15 16 10 5 21\\'/%3E%3C/svg%3E';">
+                        </div>
+                        <div class="mono text-xs font-semibold text-zinc-300 dark:text-zinc-200" style="margin-bottom: 4px; word-break: break-all;">
+                            ${label}
+                        </div>
+                        <div class="mono text-[11px] text-zinc-500 mb-3" style="word-break: break-all;">
+                            ${escapeHtml(img.profile_url || imgUrl)}
+                        </div>
+                    </div>
+
+                    <div>
+                        <!-- Reverse Visual Pivot Links -->
+                        <div style="margin-bottom: 8px;">
+                            <div class="mono text-[10px] text-zinc-500 uppercase tracking-wider mb-1.5">REVERSE VISUAL ENGINES:</div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                                ${revLinks.google_lens ? `<a href="${escapeHtml(revLinks.google_lens)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); text-decoration: none;">Lens &nearr;</a>` : ''}
+                                ${revLinks.yandex_images ? `<a href="${escapeHtml(revLinks.yandex_images)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #fb923c; border-color: rgba(251, 146, 60, 0.4); text-decoration: none;">Yandex &nearr;</a>` : ''}
+                                ${revLinks.tineye ? `<a href="${escapeHtml(revLinks.tineye)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #34d399; border-color: rgba(52, 211, 153, 0.4); text-decoration: none;">TinEye &nearr;</a>` : ''}
+                                ${revLinks.bing_visual ? `<a href="${escapeHtml(revLinks.bing_visual)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #818cf8; border-color: rgba(129, 140, 248, 0.4); text-decoration: none;">Bing &nearr;</a>` : ''}
+                                ${revLinks.pimeyes ? `<a href="${escapeHtml(revLinks.pimeyes)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-[10px] py-0.5 px-2" style="color: #f43f5e; border-color: rgba(244, 63, 94, 0.4); text-decoration: none;">PimEyes &nearr;</a>` : ''}
+                            </div>
+                        </div>
+
+                        <!-- Comparator Staging Buttons -->
+                        <div style="display: flex; gap: 6px; border-top: 1px solid var(--b-hairline); padding-top: 8px;">
+                            <button type="button" class="btn-tool text-[10px] flex-1 py-1" onclick="stageCompareImage('A', '${safeUrl}', '${platform} - ${label}')">
+                                [SET AS BASE A]
+                            </button>
+                            <button type="button" class="btn-tool text-[10px] flex-1 py-1" onclick="stageCompareImage('B', '${safeUrl}', '${platform} - ${label}')">
+                                [SET AS CANDIDATE B]
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `</div>`;
+
+        // Side-by-side Visual Comparison Area inside tab
+        html += `
+            <div id="tab-visual-comparator" style="display: none; background: var(--c-surface); border: 1px solid var(--b-hairline); border-radius: 6px; padding: 14px; margin-top: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <span class="mono text-xs font-bold text-purple-400 uppercase tracking-wide">SIDE-BY-SIDE VISUAL COMPARISON INSPECTOR:</span>
+                    <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="clearTabComparator()">Reset Inspector</button>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                    <div style="border: 1px solid var(--b-hairline); border-radius: 6px; padding: 12px; text-align: center; background: var(--c-canvas);">
+                        <div class="mono text-[11px] text-zinc-400 mb-2 font-bold">[IMAGE A // BASE IDENTITY]</div>
+                        <img id="tab-cmp-img-a" src="" alt="Base Avatar" style="max-height: 200px; max-width: 100%; border-radius: 4px; margin: 0 auto; display: block; object-fit: contain;">
+                        <div id="tab-cmp-label-a" class="mono text-xs text-zinc-300 mt-2 font-medium"></div>
+                    </div>
+                    <div style="border: 1px solid var(--b-hairline); border-radius: 6px; padding: 12px; text-align: center; background: var(--c-canvas);">
+                        <div class="mono text-[11px] text-zinc-400 mb-2 font-bold">[IMAGE B // CORRELATED IDENTITY]</div>
+                        <img id="tab-cmp-img-b" src="" alt="Correlated Avatar" style="max-height: 200px; max-width: 100%; border-radius: 4px; margin: 0 auto; display: block; object-fit: contain;">
+                        <div id="tab-cmp-label-b" class="mono text-xs text-zinc-300 mt-2 font-medium"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+}
+
+async function executeTabCustomImageReverseSearch() {
+    const input = document.getElementById("tab-custom-img-input");
+    const container = document.getElementById("tab-custom-img-engines");
+    if (!input || !container) return;
+
+    const url = input.value.trim();
+    if (!url) {
+        showToast("Please enter an image URL.", "warning");
+        return;
+    }
+
+    container.style.display = "flex";
+    container.innerHTML = `<span class="mono text-xs text-purple-400">Generating visual engine links...</span>`;
+
+    try {
+        const resp = await fetch("/api/recon/reverse-image-urls", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image_url: url })
+        });
+        const data = await resp.json();
+        const links = data.reverse_search_links || {};
+
+        let html = "";
+        if (links.google_lens) html += `<a href="${escapeHtml(links.google_lens)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); text-decoration: none;">Google Lens &nearr;</a>`;
+        if (links.yandex_images) html += `<a href="${escapeHtml(links.yandex_images)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #fb923c; border-color: rgba(251, 146, 60, 0.4); text-decoration: none;">Yandex Visual &nearr;</a>`;
+        if (links.tineye) html += `<a href="${escapeHtml(links.tineye)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #34d399; border-color: rgba(52, 211, 153, 0.4); text-decoration: none;">TinEye &nearr;</a>`;
+        if (links.bing_visual) html += `<a href="${escapeHtml(links.bing_visual)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #818cf8; border-color: rgba(129, 140, 248, 0.4); text-decoration: none;">Bing Visual &nearr;</a>`;
+        if (links.pimeyes) html += `<a href="${escapeHtml(links.pimeyes)}" target="_blank" rel="noopener noreferrer" class="btn-tool text-xs py-1 px-3" style="color: #f43f5e; border-color: rgba(244, 63, 94, 0.4); text-decoration: none;">PimEyes &nearr;</a>`;
+
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<span class="mono text-xs text-rose-400">Error: ${escapeHtml(e.message)}</span>`;
+    }
+}
+
+function stageCompareImage(slot, url, label) {
+    const comparator = document.getElementById("tab-visual-comparator");
+    if (comparator) comparator.style.display = "block";
+
+    if (slot === "A") {
+        const img = document.getElementById("tab-cmp-img-a");
+        const lbl = document.getElementById("tab-cmp-label-a");
+        if (img) img.src = url;
+        if (lbl) lbl.innerText = label;
+        showToast("Set as Base Image A", "info");
+    } else {
+        const img = document.getElementById("tab-cmp-img-b");
+        const lbl = document.getElementById("tab-cmp-label-b");
+        if (img) img.src = url;
+        if (lbl) lbl.innerText = label;
+        showToast("Set as Candidate Image B", "info");
+    }
+
+    if (comparator) {
+        comparator.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+}
+
+function clearTabComparator() {
+    const comparator = document.getElementById("tab-visual-comparator");
+    if (comparator) comparator.style.display = "none";
+    const imgA = document.getElementById("tab-cmp-img-a");
+    const imgB = document.getElementById("tab-cmp-img-b");
+    const lblA = document.getElementById("tab-cmp-label-a");
+    const lblB = document.getElementById("tab-cmp-label-b");
+    if (imgA) imgA.src = "";
+    if (imgB) imgB.src = "";
+    if (lblA) lblA.innerText = "";
+    if (lblB) lblB.innerText = "";
+}
+
+async function refreshTargetImages(email, name) {
+    showToast("Re-probing public avatar profiles...", "info");
+    try {
+        const resp = await fetch(`/api/recon/images?email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`);
+        const data = await resp.json();
+        if (currentInvestigationData) {
+            currentInvestigationData.images = data.images || [];
+        }
+        renderImageCorrelationTab({
+            images: data.images || [],
+            employee: { corporate_email: email, full_name: name }
+        });
+        showToast(`Discovered ${data.count || 0} avatar profiles`, "success");
+    } catch (e) {
+        showToast(`Error probing avatars: ${e.message}`, "error");
+    }
+}
+
+window.openImageCorrelationModal = openImageCorrelationModal;
+window.closeImageCorrelationModal = closeImageCorrelationModal;
+window.handleImageCorrelationModalBackdropClick = handleImageCorrelationModalBackdropClick;
+window.executeCustomImageReverseSearch = executeCustomImageReverseSearch;
+window.setupModalVisualCompare = setupModalVisualCompare;
+window.renderImageCorrelationTab = renderImageCorrelationTab;
+window.executeTabCustomImageReverseSearch = executeTabCustomImageReverseSearch;
+window.stageCompareImage = stageCompareImage;
+window.clearTabComparator = clearTabComparator;
+window.refreshTargetImages = refreshTargetImages;
+
 

@@ -407,6 +407,40 @@ def search_exposure(
 
     dorks_intel = generate_osint_dorks(cleaned_email, eff_domain, discovered_names)
 
+    # 5. Harvest target avatars & visual assets for Image Correlation
+    from backend.image_recon import harvest_target_images
+    candidate_handles = []
+    for p in pivots:
+        if p.get("pivot_type") == "PUBLIC_PROFILE":
+            val = p.get("pivot_value", "")
+            if ":" in val:
+                candidate_handles.append(val.split(":", 1)[1].strip())
+    if known_username:
+        candidate_handles.append(known_username.strip())
+
+    discovered_images = harvest_target_images(
+        email=cleaned_email,
+        target_name=employee.get("full_name", ""),
+        handles=candidate_handles
+    )
+
+    # 6. Extract suggested phone directories based on target name and location
+    from backend.telecom_recon import get_country_directories, COUNTRY_CODE_MAP
+    target_country_iso = None
+    for foot in footprints:
+        if foot.get("country"):
+            for pfx, c_info in COUNTRY_CODE_MAP.items():
+                if c_info["country"].lower() in foot["country"].lower():
+                    target_country_iso = c_info["iso"]
+                    break
+            if target_country_iso:
+                break
+    suggested_phone_directories = get_country_directories(
+        query=employee.get("full_name") or cleaned_email,
+        country_iso=target_country_iso or "GLOBAL",
+        query_type="person"
+    )
+
     return {
         "employee": masked_emp,
         "email_verification": verification,
@@ -421,6 +455,8 @@ def search_exposure(
         "timeline": timeline_events,
         "disposable_intelligence": disp_intel,
         "osint_dorks": dorks_intel,
+        "images": discovered_images,
+        "suggested_phone_directories": suggested_phone_directories,
         "audit_mode": audit_mode,
         "cross_target_correlations": cross_correlations,
         "scenario": scenario or ("clean" if spillover["score"] == 0 else "full")
@@ -809,6 +845,49 @@ def recon_telecom_get(query: str = Query(...), country: Optional[str] = None):
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="Query is required.")
     return query_live_international_telecom(query.strip(), country)
+
+@app.get("/api/recon/reverse-phone")
+def recon_reverse_phone(phone: str = Query(..., description="Phone number to reverse-lookup in any international format")):
+    """
+    Dedicated Reverse Phone Number Search Engine:
+    Validates E.164, detects carrier network, determines line classification (Mobile/Landline/VoIP),
+    generates messaging direct links (WhatsApp, Telegram), maps authoritative national directories,
+    and cross-correlates internal breach databases.
+    """
+    from backend.telecom_recon import reverse_phone_lookup
+    if not phone or not phone.strip():
+        raise HTTPException(status_code=400, detail="Phone number query is required.")
+    return reverse_phone_lookup(phone.strip())
+
+@app.get("/api/recon/images")
+def recon_target_images(
+    email: Optional[str] = Query(None, description="Target email address"),
+    name: Optional[str] = Query(None, description="Target full name"),
+    handle: Optional[str] = Query(None, description="Known handle or username")
+):
+    """
+    Harvests authentic profile pictures and avatars across Gravatar, GitHub, and Duolingo,
+    and provides pre-formatted 1-click reverse visual search links.
+    """
+    from backend.image_recon import harvest_target_images
+    handles = [handle.strip()] if handle and handle.strip() else []
+    images = harvest_target_images(email=(email or "").strip(), target_name=(name or "").strip(), handles=handles)
+    return {"success": True, "count": len(images), "images": images}
+
+class ReverseImageLinkRequest(BaseModel):
+    image_url: str
+
+@app.post("/api/recon/reverse-image-urls")
+def recon_reverse_image_urls(req: ReverseImageLinkRequest):
+    """
+    Generates 1-click reverse image search query links (Google Lens, Yandex, TinEye, Bing Visual, PimEyes)
+    for an arbitrary user-supplied image URL.
+    """
+    from backend.image_recon import build_reverse_image_search_links
+    if not req.image_url or not req.image_url.strip():
+        raise HTTPException(status_code=400, detail="Image URL is required.")
+    links = build_reverse_image_search_links(req.image_url.strip())
+    return {"success": True, "image_url": req.image_url.strip(), "reverse_search_links": links}
 
 
 # ==============================================================================

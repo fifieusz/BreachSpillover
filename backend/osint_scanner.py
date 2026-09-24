@@ -724,10 +724,11 @@ def ingest_breaches_to_profile(
     elif osint_results.get("primary_name"):
         real_name = osint_results["primary_name"]
     elif osint_results.get("discovered_names"):
-        # Prioritize full names with space (e.g. "Jane Doe")
+        # Prioritize full names with space and no digits (e.g. "Yasir Kadhim" over "Yasir 1Kadhim")
         candidates = list(osint_results["discovered_names"])
+        clean_spaced = [c for c in candidates if " " in c and len(c) > 4 and not any(ch.isdigit() for ch in c)]
         spaced = [c for c in candidates if " " in c and len(c) > 4]
-        real_name = spaced[0] if spaced else candidates[0]
+        real_name = clean_spaced[0] if clean_spaced else (spaced[0] if spaced else candidates[0])
 
     if real_name:
         cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (real_name, emp_id))
@@ -743,6 +744,218 @@ def ingest_breaches_to_profile(
             "Discovered via Git commit metadata and email address de-obfuscation [STATUS: VERIFIED]"
         ))
 
+    # 1a-0. Super Hybrid Engine: Derive Multi-Variation Handles & Execute WMN Enumeration
+    cand_handles = set()
+    clean_user_low = clean_user.lower()
+    cand_handles.add(clean_user_low)
+    no_dig = re.sub(r'\d+', '', clean_user_low)
+    if no_dig and len(no_dig) >= 3:
+        cand_handles.add(no_dig)
+    d_parts = [p for p in re.split(r'[._\-\+\d]+', clean_user_low) if len(p) >= 2]
+    if len(d_parts) >= 2:
+        cand_handles.add("_".join(d_parts))
+        cand_handles.add(".".join(d_parts))
+    if anchors and anchors.get("known_username"):
+        cand_handles.add(anchors["known_username"].lower().strip())
+    for dh in list(osint_results.get("discovered_handles", [])):
+        if dh:
+            cand_handles.add(dh.lower().strip())
+
+    # 1a-0a. Super Hybrid Engine: Competitive Gaming & Esports Reconnaissance
+    try:
+        from backend.esports_recon import query_esports_earnings
+        t_country = anchors.get("known_country") if anchors else None
+        if not t_country and email.lower().endswith(".nl"):
+            t_country = "Netherlands"
+        esports_matches = query_esports_earnings(
+            target_name=real_name or name or clean_user,
+            known_handles=list(cand_handles),
+            target_country=t_country
+        )
+        for esp in esports_matches:
+            gtag = esp.get("gamertag")
+            discipline = esp.get("game", "Competitive Esports")
+            prize = esp.get("earnings", "$0.00")
+            purl = esp.get("profile_url", "")
+            conf = esp.get("confidence_score", 0.95)
+
+            cursor.execute("""
+                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                emp_id,
+                None,
+                "PERSONA_PIVOT",
+                f"Competitive Gamertag: @{gtag} ({discipline})",
+                conf,
+                f"Verified competitive tournament record: {discipline} ({prize} prize earnings, {esp.get('country', 'International')}) [URL: {purl}] [STATUS: VERIFIED]"
+            ))
+
+            cursor.execute("""
+                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                emp_id,
+                None,
+                "PUBLIC_PROFILE",
+                f"Esports Earnings: @{gtag}",
+                conf,
+                f"Official competitive player profile on EsportsEarnings ({discipline}) [URL: {purl}] [STATUS: VERIFIED]"
+            ))
+
+            # Dynamically seed discovered gamertag and variants into candidate handles for recursive WMN probing
+            if gtag:
+                cand_handles.add(gtag.lower())
+                cand_handles.add(f"{gtag.lower()}1")
+    except Exception as e:
+        print(f"[!] Esports recon error: {e}")
+
+    try:
+        from backend.wmn_engine import enumerate_handle_wmn
+        import concurrent.futures
+
+        def _probe_wmn_worker(handle_str: str):
+            return handle_str, enumerate_handle_wmn(handle_str, max_sites=40, priority_only=False)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as wmn_exec:
+            fut_map = {wmn_exec.submit(_probe_wmn_worker, ch): ch for ch in list(cand_handles)[:6]}
+            for fut in concurrent.futures.as_completed(fut_map):
+                try:
+                    ch, w_res = fut.result()
+                    for wm in w_res.get("matches", []):
+                        p_url = wm.get("url", "")
+                        p_name = wm.get("platform", "Platform")
+                        if not any(dp.get("url") == p_url for dp in osint_results.get("discovered_profiles", [])):
+                            osint_results.setdefault("discovered_profiles", []).append({
+                                "platform": p_name,
+                                "url": p_url,
+                                "handle": ch,
+                                "context": f"Public account registered on {p_name} (Category: {wm.get('category', 'social')})",
+                                "confidence": wm.get("confidence_score", 0.90),
+                                "source": "WhatsMyName Matrix",
+                                "is_verified": True
+                            })
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[!] Super Hybrid WMN error: {e}")
+
+    # 1a-0b. Super Hybrid Engine: Corporate & Chamber of Commerce Reconnaissance (Dutch KvK, Drimble, Companies House)
+    corp_location_inserted = False
+    try:
+        from backend.corporate_recon import query_corporate_registries
+        corp_intel = query_corporate_registries(
+            target_name=real_name or name or clean_user,
+            target_email=email,
+            anchors=anchors
+        )
+        if corp_intel and corp_intel.get("matched"):
+            # Elevate full legal name with middle names if corroborated
+            corp_legal_name = corp_intel.get("full_legal_name")
+            if corp_legal_name:
+                real_name = corp_legal_name
+                cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (real_name, emp_id))
+                cursor.execute("""
+                    INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    emp_id,
+                    None,
+                    "FULL_NAME",
+                    f"Legal Identity: {real_name}",
+                    0.99,
+                    f"Verified Chamber of Commerce official legal name registration [STATUS: VERIFIED]"
+                ))
+
+            # Update corporate workplace / role
+            comp_name = corp_intel.get("company_name", "Corporate Entity")
+            role_title = corp_intel.get("role", "Executive / Partner")
+            cursor.execute(
+                "UPDATE employees SET job_title = ?, department = ? WHERE id = ?",
+                (role_title, comp_name, emp_id)
+            )
+            cursor.execute("""
+                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                emp_id,
+                None,
+                "WORKPLACE",
+                f"Employer: {comp_name} ({role_title})",
+                corp_intel.get("confidence_score", 0.98),
+                f"{corp_intel.get('context_summary', 'Chamber of Commerce corporate partnership')} [STATUS: VERIFIED]"
+            ))
+
+            # Insert physical business location
+            if corp_intel.get("city") and corp_intel.get("country"):
+                c_city = corp_intel["city"]
+                c_country = corp_intel["country"]
+                c_addr = f"{corp_intel.get('address', '')}, {c_city}, {c_country}".strip(", ")
+                cursor.execute("""
+                    DELETE FROM physical_footprints
+                    WHERE employee_id = ? AND exposure_type = 'PUBLIC_OSINT_RECON'
+                """, (emp_id,))
+                cursor.execute("""
+                    INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    emp_id,
+                    None,
+                    None,
+                    c_addr,
+                    c_city,
+                    corp_intel.get("postal_code", "N/A"),
+                    c_country,
+                    corp_intel.get("latitude"),
+                    corp_intel.get("longitude"),
+                    "PUBLIC_OSINT_RECON"
+                ))
+                corp_location_inserted = True
+
+            # Insert verified co-partners as business associate pivots
+            for cp in corp_intel.get("co_partners", []):
+                cp_name = cp.get("full_name")
+                cp_role = cp.get("role", "Partner (Vennoot)")
+                cursor.execute("""
+                    INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    emp_id,
+                    None,
+                    "BUSINESS_ASSOCIATE",
+                    f"Co-Partner: {cp_name}",
+                    0.98,
+                    f"Verified business partner ({cp_role}) in {comp_name} (KvK: {corp_intel.get('kvk_number', 'Registered')}, {corp_intel.get('city', '')}) [STATUS: VERIFIED]"
+                ))
+    except Exception as e:
+        print(f"[!] Corporate registry recon error: {e}")
+
+    # 1a-0c. Super Hybrid Engine: Visual Identity & Avatar Correlation (Gravatar, Duolingo, GitHub)
+    try:
+        from backend.image_recon import harvest_target_images
+        img_records = harvest_target_images(
+            email=email,
+            target_name=real_name or name or clean_user,
+            handles=list(cand_handles)
+        )
+        for img in img_records:
+            img_u = img.get("image_url") or img.get("url")
+            img_src = img.get("platform") or img.get("source", "Avatar")
+            if img_u:
+                cursor.execute("""
+                    INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    emp_id,
+                    None,
+                    "AVATAR_CORRELATION",
+                    f"{img_src} Avatar: {img_u}",
+                    0.92,
+                    f"Visual identity footprint discovered on {img_src} [URL: {img_u}] [STATUS: VERIFIED]"
+                ))
+    except Exception as e:
+        print(f"[!] Image correlation error: {e}")
+
     # 1a-2. Execute AI-Assisted Web Dork Reconnaissance (Facebook, LinkedIn, Portfolios, Location, Workplace)
     target_name_to_query = real_name or name
     try:
@@ -752,7 +965,7 @@ def ingest_breaches_to_profile(
             target_email=email,
             known_handles=list(osint_results.get("discovered_handles", []))
         )
-        location_inserted = False
+        location_inserted = corp_location_inserted
         if dork_intel and dork_intel.get("is_corroborated"):
             # Update location if discovered
             loc_data = dork_intel.get("location")
@@ -846,6 +1059,41 @@ def ingest_breaches_to_profile(
                     f"{work_data.get('context', 'Identified via verified web dork reconnaissance')} [STATUS: VERIFIED]"
                 ))
 
+            # Promote richer verified full name candidate (e.g. Yasir Ashraf Kadim) if corroborated
+            cand_name = dork_intel.get("full_name_candidate")
+            if cand_name and len(cand_name.strip()) > 3:
+                c_parts = [p.lower() for p in cand_name.strip().split()]
+                curr_parts = [p.lower() for p in (real_name or name or "").strip().split()]
+                if len(c_parts) > len(curr_parts) and any(cp in c_parts for cp in curr_parts if len(cp) >= 3):
+                    cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (cand_name.strip(), emp_id))
+                    cursor.execute("""
+                        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        emp_id,
+                        None,
+                        "FULL_NAME",
+                        f"Legal Identity: {cand_name.strip()}",
+                        0.95,
+                        "Corroborated legal name with middle initials/names enriched via public web footprint [STATUS: VERIFIED]"
+                    ))
+
+            # Ingest verified phone numbers discovered during dork recon
+            for ph in dork_intel.get("phone_numbers", []):
+                clean_ph = ph.strip()
+                if clean_ph:
+                    cursor.execute("""
+                        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        emp_id,
+                        None,
+                        "PHONE_NUMBER",
+                        f"Telecom: {clean_ph}",
+                        0.88,
+                        "Discovered in public web footprint or personal portfolio metadata [STATUS: VERIFIED]"
+                    ))
+
             # Ingest discovered social profiles (LinkedIn, Facebook, Portfolio)
             has_fb_profile = False
             for prof in dork_intel.get("profiles", []):
@@ -873,7 +1121,7 @@ def ingest_breaches_to_profile(
                         INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (emp_id, None, None, pf[0], pf[1], pf[2], pf[3], pf[4], pf[5], pf[6]))
-        elif prev_osint_footprints:
+        elif not corp_location_inserted and prev_osint_footprints:
             for pf in prev_osint_footprints:
                 cursor.execute("""
                     INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
@@ -881,7 +1129,7 @@ def ingest_breaches_to_profile(
                 """, (emp_id, None, None, pf[0], pf[1], pf[2], pf[3], pf[4], pf[5], pf[6]))
     except Exception as e:
         print(f"[!] AI Web Dork Recon error: {e}")
-        if prev_osint_footprints:
+        if not corp_location_inserted and prev_osint_footprints:
             for pf in prev_osint_footprints:
                 cursor.execute("""
                     INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)

@@ -1274,7 +1274,12 @@ def derive_full_names(email: str, author_names: Set[str], anchors: Optional[Dict
                 if len(sur) >= 2 and not sur.isdigit():
                     names.add(f"{parts[0].title()} {sur.title()}")
                     
-    # 2. Email format first.last or first_last
+    # 2. Universal delimiter & internal digit splitting (e.g. yasir1kadhim -> Yasir Kadhim, john.smith -> John Smith)
+    split_parts = [p for p in re.split(r'[._\-\+\d]+', clean_local) if len(p) >= 2]
+    if len(split_parts) >= 2 and all(not p.isdigit() for p in split_parts):
+        names.add(" ".join(p.title() for p in split_parts))
+
+    # 3. Email format first.last or first_last
     if "." in clean_local:
         pts = clean_local.split(".")
         if len(pts) == 2 and all(len(p) >= 2 for p in pts) and not pts[1].isdigit():
@@ -1284,14 +1289,32 @@ def derive_full_names(email: str, author_names: Set[str], anchors: Optional[Dict
         if len(pts) == 2 and all(len(p) >= 2 for p in pts) and not pts[1].isdigit():
             names.add(f"{pts[0].title()} {pts[1].title()}")
     else:
-        # 3. Compound handle splitting (e.g. jordinzwaan -> Jordin Zwaan)
+        # 4. Compound handle splitting (e.g. jordinzwaan -> Jordin Zwaan, yasirkadhim -> Yasir Kadhim)
         common_firsts = {
+            # Western & Anglo-American
             "jordin", "jordan", "filip", "phillip", "philip", "alex", "alexander", "david",
             "john", "michael", "mike", "lucas", "luka", "thomas", "daniel", "dan", "robert",
             "peter", "mark", "kevin", "brian", "jason", "eric", "erik", "lisa", "anna",
             "maria", "emma", "sophia", "olivia", "james", "william", "benjamin", "samuel",
             "nathan", "niels", "lars", "sander", "stefan", "bram", "thijs", "daan", "tim",
-            "tom", "max", "ruben", "julian", "milan", "luuk", "mees", "gijs", "teun"
+            "tom", "max", "ruben", "julian", "milan", "luuk", "mees", "gijs", "teun",
+            "adam", "oliver", "henry", "george", "charles", "richard", "joseph", "sam",
+            "paul", "steven", "anthony", "andrew", "edward", "harry", "jack", "noah",
+            # Middle Eastern & Arabic & Islamic
+            "yasir", "yasser", "ashraf", "kadim", "kadhim", "ali", "omar", "mohammed", "mohamed",
+            "muhammad", "ahmed", "ahmad", "hassan", "hussein", "tariq", "tarik", "kareem",
+            "karim", "mustafa", "mahmoud", "ibrahim", "youssef", "yousef", "bilal", "hamza",
+            "khalid", "walid", "ziad", "zaid", "samir", "rami", "nabil", "fadi", "amr",
+            # Slavic & Eastern European
+            "mateusz", "piotr", "krzysztof", "pawel", "michal", "jan", "jakub", "marcin",
+            "tomasz", "andrzej", "stanislaw", "wojciech", "lukasz", "grzegorz", "dmitry",
+            "alexei", "sergey", "ivan", "vladimir", "igor", "mikhail", "nikolay", "artem",
+            # Nordic & Scandinavian
+            "ole", "per", "knut", "sven", "magnus", "henrik", "jonas", "espen", "morten",
+            "bjorn", "tor", "geir", "rune", "arild", "frode", "oyvind", "einar",
+            # Southern European & Latin
+            "carlos", "luis", "juan", "miguel", "antonio", "pedro", "manuel", "jose",
+            "marco", "matteo", "luca", "francesco", "alessandro", "giovanni", "andrea"
         }
         for fn in sorted(common_firsts, key=lambda x: -len(x)):
             if clean_stem.startswith(fn) and len(clean_stem) > len(fn) + 1:
@@ -2533,14 +2556,22 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
         osint_report["discovered_names"].add(name)
 
     best_name = None
-    for n in osint_report["discovered_names"]:
-        if " " in n.strip() and not is_common_given_name(n.strip()):
+    clean_candidates = [n.strip() for n in osint_report["discovered_names"] if not any(c.isdigit() for c in n)]
+    digit_candidates = [n.strip() for n in osint_report["discovered_names"] if any(c.isdigit() for c in n)]
+
+    for n in clean_candidates:
+        if " " in n and not is_common_given_name(n):
             if not best_name or len(n) > len(best_name):
-                best_name = n.strip()
-    if not best_name and osint_report["discovered_names"]:
-        for n in osint_report["discovered_names"]:
+                best_name = n
+    if not best_name:
+        for n in digit_candidates:
+            if " " in n and not is_common_given_name(n):
+                if not best_name or len(n) > len(best_name):
+                    best_name = n
+    if not best_name and clean_candidates:
+        for n in clean_candidates:
             if len(n) > 2 and not is_common_given_name(n):
-                best_name = n.strip()
+                best_name = n
                 break
     osint_report["primary_name"] = best_name
     for h in git_intel["handles"]:

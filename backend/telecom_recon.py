@@ -9,6 +9,13 @@ import urllib.parse
 import urllib.request
 from typing import Dict, Any, List, Optional, Tuple
 
+try:
+    import phonenumbers
+    from phonenumbers import geocoder, carrier, PhoneNumberType
+    _HAS_PHONENUMBERS = True
+except ImportError:
+    _HAS_PHONENUMBERS = False
+
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 # Country codes & metadata
@@ -32,6 +39,16 @@ def parse_and_detect_phone(raw_phone: str) -> Dict[str, Any]:
     """
     if not raw_phone:
         return {"is_valid": False, "raw": "", "country": "Unknown", "iso": "UNKNOWN"}
+
+    # Handle space that was converted from '+' in unencoded URL query strings
+    raw_s = raw_phone.strip()
+    if raw_phone.startswith(" ") or (raw_s and raw_s[0].isdigit() and not raw_s.startswith("0")):
+        clean_d = re.sub(r"[^\d]", "", raw_s)
+        for prefix in sorted(COUNTRY_CODE_MAP.keys(), key=lambda x: -len(x)):
+            pfx_num = prefix.replace("+", "")
+            if clean_d.startswith(pfx_num) and len(clean_d) >= len(pfx_num) + 7:
+                raw_phone = "+" + clean_d
+                break
 
     cleaned = re.sub(r"[^\d+]", "", raw_phone.strip())
     # Normalize leading 00 to +
@@ -322,11 +339,63 @@ def get_country_directories(
                 "url": f"https://www.tellows.de/num/{digits_only if is_phone else encoded_q}",
                 "is_primary": False
             }
+        ],
+        "NL": [
+            {
+                "country": "Netherlands",
+                "flag": "NL",
+                "name": "De Telefoongids / Gouden Gids",
+                "category": "National Telecom Directory",
+                "badge": "detelefoongids.nl",
+                "description": "The Netherlands primary public white/yellow pages phone and person directory.",
+                "url": f"https://www.detelefoongids.nl/zoeken/{encoded_q}/" if not is_phone else f"https://www.detelefoongids.nl/zoeken/{digits_only}/",
+                "is_primary": True
+            },
+            {
+                "country": "Netherlands",
+                "flag": "NL",
+                "name": "WieHeeftGebeldb",
+                "category": "Reverse Phone & Caller ID",
+                "badge": "wieheeftgebeld.nl",
+                "description": "Dutch reverse telephone directory, caller reputation, and line identification index.",
+                "url": f"https://www.wieheeftgebeld.nl/nummer/{digits_only[-10:] if is_phone else encoded_q}",
+                "is_primary": False
+            },
+            {
+                "country": "Netherlands",
+                "flag": "NL",
+                "name": "KVK Bedrijvenregister",
+                "category": "Commercial Register",
+                "badge": "kvk.nl",
+                "description": "Dutch Chamber of Commerce corporate register and sole proprietorship listings.",
+                "url": f"https://www.kvk.nl/zoeken/?q={encoded_q}",
+                "is_primary": False
+            },
+            {
+                "country": "Netherlands",
+                "flag": "NL",
+                "name": "Telefoonboek.nl",
+                "category": "White Pages",
+                "badge": "telefoonboek.nl",
+                "description": "Dutch residential address, telephone, and business registry.",
+                "url": f"https://www.telefoonboek.nl/zoeken/{encoded_q}/",
+                "is_primary": False
+            }
         ]
     }
 
     # Universal search operators that work across every country
     universal_tools = [
+        {
+            "country": "Universal",
+            "flag": "INTL",
+            "name": "Truecaller International Search",
+            "category": "Global Caller ID",
+            "badge": "truecaller.com",
+            "description": "Global crowd-sourced caller identification index with over 350 million active users.",
+            "url": f"https://www.truecaller.com/search/{digits_only}" if is_phone else "https://www.truecaller.com/",
+            "is_primary": True
+        },
         {
             "country": "Universal",
             "flag": "INTL",
@@ -397,4 +466,136 @@ def query_live_international_telecom(
         "detected_iso": detected_iso,
         "live_records": live_records,
         "directories": directories
+    }
+
+
+def reverse_phone_lookup(raw_phone: str, db_connection=None) -> Dict[str, Any]:
+    """
+    Complete reverse phone investigation:
+    - Normalization: E.164, International, National, RFC3966
+    - Country, ISO, Region, Prefix
+    - Carrier network detection
+    - Line type classification (Mobile, Landline, VoIP, etc.)
+    - Direct messaging links (WhatsApp, Telegram)
+    - Country-specific directories & caller ID dispatchers
+    - Internal database correlation
+    """
+    if not raw_phone:
+        return {"success": False, "error": "Phone number query is required"}
+
+    parsed = parse_and_detect_phone(raw_phone)
+    e164 = parsed.get("e164", "")
+    digits_only = parsed.get("digits_only", "")
+
+    carrier_name = ""
+    geographic_location = ""
+    line_type = parsed.get("line_type", "Mobile / Cellular")
+    is_valid = parsed.get("is_valid", False)
+    intl_format = e164
+    nat_format = digits_only
+    rfc_format = f"tel:{e164}" if e164 else ""
+
+    if _HAS_PHONENUMBERS and raw_phone.strip():
+        try:
+            cleaned_input = e164 if e164.startswith("+") else raw_phone.strip()
+            num_obj = None
+            if cleaned_input.startswith("+"):
+                num_obj = phonenumbers.parse(cleaned_input, None)
+            else:
+                hint_iso = parsed.get("iso", "NO")
+                if hint_iso == "GLOBAL":
+                    hint_iso = "NO"
+                num_obj = phonenumbers.parse(cleaned_input, hint_iso)
+
+            if num_obj:
+                is_valid = phonenumbers.is_valid_number(num_obj)
+                e164 = phonenumbers.format_number(num_obj, phonenumbers.PhoneNumberFormat.E164)
+                intl_format = phonenumbers.format_number(num_obj, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+                nat_format = phonenumbers.format_number(num_obj, phonenumbers.PhoneNumberFormat.NATIONAL)
+                rfc_format = phonenumbers.format_number(num_obj, phonenumbers.PhoneNumberFormat.RFC3966)
+                digits_only = re.sub(r'\D', '', e164)
+
+                carrier_name = carrier.name_for_number(num_obj, "en")
+                geographic_location = geocoder.description_for_number(num_obj, "en")
+
+                ntype = phonenumbers.number_type(num_obj)
+                type_map = {
+                    PhoneNumberType.MOBILE: "Mobile / Cellular",
+                    PhoneNumberType.FIXED_LINE: "Fixed Line / Landline",
+                    PhoneNumberType.FIXED_LINE_OR_MOBILE: "Fixed Line or Mobile",
+                    PhoneNumberType.VOIP: "VoIP / Virtual Line",
+                    PhoneNumberType.TOLL_FREE: "Toll-Free Number",
+                    PhoneNumberType.PREMIUM_RATE: "Premium Rate Number",
+                    PhoneNumberType.SHARED_COST: "Shared Cost Number",
+                    PhoneNumberType.PAGER: "Pager",
+                    PhoneNumberType.UAN: "Universal Access Number (UAN)",
+                    PhoneNumberType.VOICEMAIL: "Voicemail Access"
+                }
+                if ntype in type_map:
+                    line_type = type_map[ntype]
+        except Exception:
+            pass
+
+    # Messaging shortcuts
+    messaging_links = {
+        "whatsapp": f"https://wa.me/{digits_only}" if digits_only else None,
+        "telegram": f"https://t.me/+{digits_only}" if digits_only else None,
+        "viber": f"viber://chat?number=%2B{digits_only}" if digits_only else None
+    }
+
+    # Directories
+    iso = parsed.get("iso", "GLOBAL")
+    directories = get_country_directories(e164 or raw_phone, country_iso=iso)
+
+    # Internal database correlation
+    correlations = []
+    if digits_only:
+        try:
+            from backend.database import get_connection
+            conn = db_connection or get_connection()
+            cur = conn.cursor()
+            suffix = digits_only[-8:] if len(digits_only) >= 8 else digits_only
+            cur.execute("""
+                SELECT p.employee_id, e.full_name, e.corporate_email, p.pivot_type, p.pivot_value, p.context_note
+                FROM pivots p
+                JOIN employees e ON p.employee_id = e.id
+                WHERE p.pivot_type = 'PHONE_NUMBER' AND (
+                    p.pivot_value LIKE ? OR p.pivot_value LIKE ?
+                )
+                LIMIT 10
+            """, (f"%{suffix}%", f"%{e164}%"))
+            rows = cur.fetchall()
+            for r in rows:
+                correlations.append({
+                    "employee_id": r["employee_id"],
+                    "full_name": r["full_name"],
+                    "corporate_email": r["corporate_email"],
+                    "pivot_type": r["pivot_type"],
+                    "pivot_value": r["pivot_value"],
+                    "context": r["context_note"]
+                })
+            if not db_connection:
+                conn.close()
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "raw_query": raw_phone,
+        "is_valid": is_valid,
+        "e164": e164,
+        "international_format": intl_format,
+        "national_format": nat_format,
+        "rfc3966": rfc_format,
+        "digits_only": digits_only,
+        "country": parsed.get("country_name", "International"),
+        "country_iso": parsed.get("iso", "GLOBAL"),
+        "country_prefix": parsed.get("country_prefix", ""),
+        "continent": parsed.get("continent", "Global"),
+        "carrier": carrier_name or "Standard Cellular / Regional Telecom Network",
+        "geographic_location": geographic_location or parsed.get("country_name", ""),
+        "line_type": line_type,
+        "messaging_shortcuts": messaging_links,
+        "directories": directories,
+        "database_correlations": correlations
     }
