@@ -150,7 +150,8 @@ def search_exposure(
     known_name: Optional[str] = None,
     known_username: Optional[str] = None,
     known_phone: Optional[str] = None,
-    known_city: Optional[str] = None
+    known_city: Optional[str] = None,
+    refresh: bool = False
 ):
     """
     Performs live OSINT pivoting and calculates the Spillover Score for an email or username handle.
@@ -160,7 +161,18 @@ def search_exposure(
     if not raw_target:
         raise HTTPException(status_code=400, detail="Target email or username query is required.")
 
-    # Universal search routing: detect if input is a handle/username (no @)
+    # Composite query decomposition: extract email and name if user entered combined query
+    # e.g. "Amir Secic 3gbxdd@gmail.com", "3gbxdd@gmail.com (Amir Secic)", "Amir Secic <3gbxdd@gmail.com>"
+    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', raw_target)
+    if email_match:
+        extracted_email = email_match.group(0).lower()
+        remainder = raw_target.replace(email_match.group(0), '').strip(" ()<>,;:[]\"'")
+        if remainder and not known_name:
+            if re.search(r'[a-zA-Z]{2,}', remainder) and not remainder.startswith("+"):
+                known_name = remainder.strip()
+        raw_target = extracted_email
+
+    # Universal search routing: detect if input is a handle/username or full person name (no @)
     is_domain = ("@" not in raw_target and "." in raw_target and any(raw_target.lower().endswith(tld) for tld in [".com", ".net", ".org", ".io", ".co", ".ai", ".gov", ".edu", ".pl", ".de", ".uk", ".dev", ".app"]))
     if "@" not in raw_target and not raw_target.startswith("+"):
         # Check if an existing profile matches this handle or email prefix
@@ -178,9 +190,13 @@ def search_exposure(
                 known_username = raw_target
             cleaned_email = match_row["corporate_email"].lower()
         elif not is_domain:
-            if not known_username:
-                known_username = raw_target
-            cleaned_email = f"{raw_target.lower()}@osint.local"
+            if " " in raw_target and not known_name:
+                known_name = raw_target
+                cleaned_email = f"{raw_target.lower().replace(' ', '.')}@osint.local"
+            else:
+                if not known_username:
+                    known_username = raw_target
+                cleaned_email = f"{raw_target.lower()}@osint.local"
         else:
             cleaned_email = raw_target.lower()
     else:
@@ -206,7 +222,8 @@ def search_exposure(
         custom_city=custom_city,
         custom_street=custom_street,
         custom_relative=custom_relative,
-        anchors=anchors
+        anchors=anchors,
+        refresh=refresh
     )
 
     emp_id = employee["id"]

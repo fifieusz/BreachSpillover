@@ -89,33 +89,32 @@
     <header class="app-header">
         <div class="header-inner">
             <div class="brand">
-                <div class="brand-shield font-mono font-bold text-xs tracking-tighter">BS</div>
-                <div class="brand-text">
-                    <span class="brand-title tracking-tight">BreachSpillover</span>
-                    <span class="brand-subtitle font-mono tracking-wider text-[11px] text-zinc-500 uppercase">Security Intelligence &amp; Exposure Ledger</span>
-                </div>
+                <span class="brand-title tracking-tight">Breach Spillover</span>
             </div>
 
             <div class="header-actions">
-                <div class="stats-counter" title="Active Threat Intelligence Corpus">
-                    <span class="stats-dot"></span>
-                    <span id="stat-threat-summary">Threat DB: 8 Leaks Indexed</span>
-                </div>
+
 
                 <!-- AI Engine Configuration Control -->
                 <div class="ai-header-control" title="Configure Cloud LLM Threat Model (Groq Llama 3.3 / Gemini)">
                     <button type="button" id="btn-ai-settings" class="btn-declassify-badge" onclick="openAISettingsModal()">
                         <span id="ai-status-icon" class="status-btn-icon"></span>
-                        <span id="ai-status-text">AI ENGINE: READY</span>
+                        <span id="ai-status-text">AI: READY</span>
                     </button>
                 </div>
 
 
                 <!-- Retro 8-Bit Pokémon SFX Toggle -->
-                <div class="sfx-header-control" title="Toggle 8-Bit Retro Pokémon Sound Effects">
-                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge" onclick="window.SoundManager ? window.SoundManager.toggle() : (window.sfx && window.sfx.toggle())">
-                        <span id="sfx-toggle-icon" class="mono text-xs">[SOUND]</span>
-                        <span id="sfx-toggle-text">ON</span>
+                <div class="sfx-header-control" title="Toggle Sound Effects & Audio Cues">
+                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge active" onclick="window.toggleSoundEffects()">
+                        <span id="sfx-toggle-icon" class="sfx-icon inline-flex items-center">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                            </svg>
+                        </span>
+                        <span id="sfx-toggle-text">SOUND: ON</span>
                     </button>
                 </div>
 
@@ -170,67 +169,32 @@
                     >
                     <div class="search-indicators">
                         <span id="search-type-badge" class="search-type-badge font-mono">[STANDBY: AUTO-DETECT]</span>
-                        <span class="search-kbd-hint font-mono">⌘K</span>
+                        <span class="search-kbd-hint font-mono">Ctrl+K</span>
                     </div>
                 </div>
                 <button type="button" id="btn-search" class="btn-primary" onclick="triggerSearch()">
                     <span>Execute Scan</span>
-                    <span class="mono text-[10px] opacity-70">↵</span>
-                </button>
-                <button type="button" id="btn-batch-modal" class="btn-secondary" onclick="openBatchModal()">
-                    <span>Batch Audit</span>
+                    <span class="mono text-[10px] opacity-70">[ENTER]</span>
                 </button>
             </form>
 
-            <!-- Cockpit Forensic Tools & Deep Dive Reconnaissance Anchors Row -->
-            <div class="cockpit-tools-row">
-                <div class="search-anchors-toggle-wrapper">
-                    <label class="search-checkbox-label" for="toggle-extra-intel">
-                        <input type="checkbox" id="toggle-extra-intel" onchange="toggleExtraIntelFields()">
-                        <span class="checkbox-custom"></span>
-                        <span class="checkbox-text font-mono text-[11px] tracking-wide text-zinc-400">Deep Dive Reconnaissance Anchors (Add known Name, Username/Handle, Phone, Location)</span>
-                    </label>
+            <!-- Integrated Upfront Reconnaissance Anchors Grid (Available immediately) -->
+            <div class="cockpit-anchors-grid">
+                <div class="cockpit-anchor-field">
+                    <label for="anchor-name" class="cockpit-anchor-label mono">NAME (OPTIONAL):</label>
+                    <input type="text" id="anchor-name" class="cockpit-anchor-input mono" placeholder="Known Full Name">
                 </div>
-                <div class="cockpit-forensic-tools">
-                    <button type="button" id="btn-combolist-modal" class="btn-cockpit-tool btn-cockpit-blue" onclick="openCombolistModal()" title="Ingest Custom Combolist / Breach Data">
-                        <span class="cockpit-tool-dot"></span>
-                        <span id="combolist-btn-text">INGEST COMBOLIST</span>
-                    </button>
-                    <button type="button" id="btn-reverse-phone-modal" class="btn-cockpit-tool btn-cockpit-green" onclick="openReversePhoneModal()" title="Reverse Phone Number Lookup &amp; Carrier Detection">
-                        <span class="cockpit-tool-dot"></span>
-                        <span>REVERSE PHONE</span>
-                    </button>
-                    <button type="button" id="btn-image-recon-modal" class="btn-cockpit-tool btn-cockpit-purple" onclick="openImageCorrelationModal()" title="Visual Identity &amp; Avatar Correlation">
-                        <span class="cockpit-tool-dot"></span>
-                        <span>IMAGE CORRELATION</span>
-                    </button>
+                <div class="cockpit-anchor-field">
+                    <label for="anchor-username" class="cockpit-anchor-label mono">HANDLE / USERNAME (OPTIONAL):</label>
+                    <input type="text" id="anchor-username" class="cockpit-anchor-input mono" placeholder="Known Handle">
                 </div>
-            </div>
-            <div id="extra-intel-panel" class="extra-intel-panel" style="display: none;">
-                <div class="extra-intel-header">
-                    <span class="mono extra-intel-title text-zinc-300">INVESTIGATOR RECONNAISSANCE ANCHORS</span>
-                    <span class="badge-pill badge-neutral">FACTUAL CORRELATION ENGINE</span>
+                <div class="cockpit-anchor-field">
+                    <label for="anchor-phone" class="cockpit-anchor-label mono">PHONE NUMBER (OPTIONAL):</label>
+                    <input type="text" id="anchor-phone" class="cockpit-anchor-input mono" placeholder="Known Phone Line">
                 </div>
-                <div class="extra-intel-grid">
-                    <div class="extra-input-group">
-                        <label for="anchor-name" class="extra-label mono">KNOWN FULL NAME:</label>
-                        <input type="text" id="anchor-name" class="extra-input mono" placeholder="e.g. Alex Morgan / Jan Kowalski">
-                    </div>
-                    <div class="extra-input-group">
-                        <label for="anchor-username" class="extra-label mono">KNOWN USERNAME / HANDLE:</label>
-                        <input type="text" id="anchor-username" class="extra-input mono" placeholder="e.g. filipos / darkhunter">
-                    </div>
-                    <div class="extra-input-group">
-                        <label for="anchor-phone" class="extra-label mono">KNOWN TELEPHONE NUMBER:</label>
-                        <input type="text" id="anchor-phone" class="extra-input mono" placeholder="e.g. +1 415 555 0192 / +48 ...">
-                    </div>
-                    <div class="extra-input-group">
-                        <label for="anchor-city" class="extra-label mono">KNOWN RESIDENCE / CITY:</label>
-                        <input type="text" id="anchor-city" class="extra-input mono" placeholder="e.g. London, UK / Warsaw, Poland">
-                    </div>
-                </div>
-                <div class="extra-intel-footnote mono">
-                    Anchors are utilized to query live public profiles (Gravatar, GitHub, Duolingo, PGP) and correlate exfiltrated records without synthesizing fake data.
+                <div class="cockpit-anchor-field">
+                    <label for="anchor-city" class="cockpit-anchor-label mono">LOCATION (OPTIONAL):</label>
+                    <input type="text" id="anchor-city" class="cockpit-anchor-input mono" placeholder="City or Country">
                 </div>
             </div>
 
@@ -422,27 +386,22 @@
                         <div class="identity-titles">
                             <div class="identity-headline">
                                 <h2 id="target-name" class="tracking-tight">—</h2>
-                                <span id="severity-badge" class="badge-pill badge-clean">—</span>
-                                <span id="domain-status-badge" class="badge-pill badge-clean">—</span>
+                                <span id="domain-status-badge" class="badge-pill badge-clean" style="display: none;">—</span>
                             </div>
                             <div class="identity-subline mono">
                                 <span id="target-email-display">—</span>
-                                <span class="bullet">&bull;</span>
-                                <span id="target-title">—</span>
-                                <span class="bullet">&bull;</span>
-                                <span id="target-dept">—</span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Compact Numerical Score Gauge -->
+                    <!-- Risk Word & Score Gauge (No Tiers) -->
                     <div class="score-index-cell">
                         <div class="score-number-display">
-                            <span id="score-number" class="score-big-val" style="font-size: 3.2rem;">—</span>
+                            <span id="score-number" class="score-big-val" style="font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em;">—</span>
                         </div>
                         <div class="score-label-col">
-                            <span class="score-tag-title">Spillover Risk Tier</span>
-                            <span class="mono text-[10px] text-zinc-500 uppercase tracking-wider">Deterministic Categorical Model</span>
+                            <span id="score-level-label" class="score-tag-title">RISK EVALUATION</span>
+                            <span id="score-numeric-badge" class="mono text-[11px] text-zinc-400 font-bold tracking-wider">SCORE: —/100</span>
                         </div>
                     </div>
                 </div>
@@ -458,56 +417,61 @@
                     </button>
                 </div>
 
-                <!-- 4-Pillar Hairline Bento Grid -->
+                <!-- 5-Pillar Multi-Item Bento Grid -->
                 <div id="results-findings-grid" class="findings-grid">
-                    <!-- Pillar 1: Password -->
-                    <div class="finding-card finding-card-clickable" id="card-creds" onclick="handleFindingCardClick('creds')" title="Click to unlock/reveal leaked password">
+                    <!-- Pillar 1: Password & Hashes -->
+                    <div class="finding-card finding-card-clickable" id="card-creds" onclick="handleFindingCardClick('creds')" title="Click to inspect credential vault">
                         <div class="finding-header">
                             <span class="finding-index-tag">[01 // CREDENTIALS]</span>
-                            <span class="badge-lock" id="badge-lock-creds">LOCKED</span>
+                            <span class="badge-lock" id="badge-lock-creds">—</span>
                         </div>
-                        <div id="summary-password" class="finding-main-val mono">—</div>
-                        <div id="summary-service" class="finding-sub-val">—</div>
+                        <div id="summary-creds-list" class="finding-items-list">
+                            <div class="finding-empty-val mono">Awaiting scan...</div>
+                        </div>
                     </div>
 
-                    <!-- Pillar 2: Physical Address -->
-                    <div class="finding-card finding-card-clickable" id="card-address" onclick="handleFindingCardClick('address')" title="Click to unlock/reveal residential coordinates">
+                    <!-- Pillar 2: Physical & Geographic Footprints -->
+                    <div class="finding-card finding-card-clickable" id="card-address" onclick="handleFindingCardClick('address')" title="Click to inspect geolocation coordinates">
                         <div class="finding-header">
-                            <span class="finding-index-tag">[02 // RESIDENTIAL]</span>
-                            <span class="badge-lock" id="badge-lock-address">LOCKED</span>
+                            <span class="finding-index-tag">[02 // GEOLOCATION]</span>
+                            <span class="badge-lock" id="badge-lock-address">—</span>
                         </div>
-                        <div id="summary-address" class="finding-main-val">—</div>
-                        <div id="summary-city" class="finding-sub-val">—</div>
+                        <div id="summary-locations-list" class="finding-items-list">
+                            <div class="finding-empty-val">Awaiting scan...</div>
+                        </div>
                     </div>
 
-                    <!-- Pillar 3: Personal Pivots -->
-                    <div class="finding-card finding-card-clickable" id="card-phone" onclick="handleFindingCardClick('phone')" title="Click to unlock/reveal mobile phone line">
+                    <!-- Pillar 3: Telecom & Phone Lines -->
+                    <div class="finding-card finding-card-clickable" id="card-phone" onclick="handleFindingCardClick('phone')" title="Click to inspect telecom lines">
                         <div class="finding-header">
                             <span class="finding-index-tag">[03 // TELECOM]</span>
-                            <span class="badge-lock" id="badge-lock-phone">LOCKED</span>
+                            <span class="badge-lock" id="badge-lock-phone">—</span>
                         </div>
-                        <div id="summary-phone" class="finding-main-val mono">—</div>
-                        <div id="summary-priv-email" class="finding-sub-val">—</div>
+                        <div id="summary-phones-list" class="finding-items-list">
+                            <div class="finding-empty-val mono">Awaiting scan...</div>
+                        </div>
                     </div>
 
-                    <!-- Pillar 4: Household Contact -->
-                    <div class="finding-card finding-card-clickable" id="card-relative" onclick="handleFindingCardClick('relative')" title="Click to unlock/reveal mapped household co-habitants">
+                    <!-- Pillar 4: Household Cohabitants -->
+                    <div class="finding-card finding-card-clickable" id="card-relative" onclick="handleFindingCardClick('relative')" title="Click to inspect household cohabitants">
                         <div class="finding-header">
                             <span class="finding-index-tag">[04 // HOUSEHOLD]</span>
-                            <span class="badge-lock" id="badge-lock-relative">LOCKED</span>
+                            <span class="badge-lock" id="badge-lock-relative">—</span>
                         </div>
-                        <div id="summary-relative" class="finding-main-val">—</div>
-                        <div id="summary-rel-role" class="finding-sub-val">—</div>
+                        <div id="summary-relatives-list" class="finding-items-list">
+                            <div class="finding-empty-val">Awaiting scan...</div>
+                        </div>
                     </div>
 
-                    <!-- Pillar 5: Workplace & Employment -->
-                    <div class="finding-card finding-card-clickable" id="card-workplace" onclick="handleFindingCardClick('pivots')" title="Click to view corporate employer and workplace affiliations">
+                    <!-- Pillar 5: Workplace & Academic Career -->
+                    <div class="finding-card finding-card-clickable" id="card-workplace" onclick="handleFindingCardClick('workplace')" title="Click to inspect verified workplace and employment history">
                         <div class="finding-header">
-                            <span class="finding-index-tag">[05 // WORKPLACE]</span>
-                            <span class="badge-lock" id="badge-lock-workplace">LOCKED</span>
+                            <span class="finding-index-tag">[05 // WORKPLACE &amp; CAREER]</span>
+                            <span class="badge-lock" id="badge-lock-workplace">—</span>
                         </div>
-                        <div id="summary-workplace" class="finding-main-val">—</div>
-                        <div id="summary-workplace-role" class="finding-sub-val">—</div>
+                        <div id="summary-workplace-list" class="finding-items-list">
+                            <div class="finding-empty-val">Awaiting scan...</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -589,79 +553,53 @@
                     </div>
                 </section>
 
-                <!-- Forensic Evidence Tabs -->
+                <!-- Forensic Evidence Tabs: Streamlined 6 Core Ledgers -->
                 <section class="card-panel">
                     <div class="tabs-nav">
-                        <button type="button" class="tab-btn active" data-tab="tab-leaks">[MALWARE &amp; LEAKS]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-creds">[CREDENTIALS]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-pivots">[PIVOTS]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-suspected">[SUSPECTED (<span id="count-suspected">0</span>)]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-physical">[RESIDENTIAL]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-provenance">[THREAT MATRIX]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-playbook">[ATTACK PLAYBOOK]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-remediations">[REMEDIATION]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-timeline">[TIMELINE]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-telemetry">[TELEMETRY]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-dorks">[OSINT DORKS]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-wmn">[WMN ENUMERATION]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-images">[IMAGE CORRELATION]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-telecom">[REVERSE PHONE]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-pastes">[PASTE LEAKS]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-ai">[AI DOSSIER]</button>
+                        <button type="button" class="tab-btn active" data-tab="tab-pivots">[VERIFIED PIVOTS]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-suspected">[SUSPECTED CANDIDATES (<span id="count-suspected">0</span>)]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-leaks">[BREACH DISCLOSURES]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-creds">[CREDENTIAL VAULT]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-physical">[GEOLOCATION &amp; MAP]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-timeline">[ATTACK CHAIN &amp; TIMELINE]</button>
                     </div>
 
                     <div class="tabs-content">
-                        <!-- Leaks & Malware Tab: Rendered as Expandable Dense Table / Drawer -->
-                        <div id="tab-leaks" class="tab-pane active">
-                            <div id="tab-leaks-content"></div>
-                        </div>
-                        <div id="tab-creds" class="tab-pane">
-                            <div id="tab-creds-content"></div>
-                        </div>
-                        <div id="tab-pivots" class="tab-pane">
+                        <!-- 1. Verified Pivots Ledger -->
+                        <div id="tab-pivots" class="tab-pane active">
                             <div id="tab-pivots-content"></div>
                         </div>
+
+                        <!-- 2. Suspected Candidates Ledger -->
                         <div id="tab-suspected" class="tab-pane">
                             <div id="tab-suspected-content"></div>
                         </div>
+
+                        <!-- 3. Breach Disclosures Ledger -->
+                        <div id="tab-leaks" class="tab-pane">
+                            <div id="tab-leaks-content"></div>
+                        </div>
+
+                        <!-- 4. Credential Vault Ledger -->
+                        <div id="tab-creds" class="tab-pane">
+                            <div id="tab-creds-content"></div>
+                        </div>
+
+                        <!-- 5. Geolocation & Physical Map -->
                         <div id="tab-physical" class="tab-pane">
                             <div id="tab-physical-content" style="height: 100%; display: flex; flex-direction: column; gap: 10px;">
                                 <div id="map-container" style="height: 350px; width: 100%; border-radius: 8px; border: 1px solid var(--b-hairline); background: var(--c-canvas); position: relative;"></div>
                                 <div id="tab-physical-list"></div>
                             </div>
                         </div>
-                        <div id="tab-provenance" class="tab-pane">
-                            <div id="tab-provenance-content"></div>
-                        </div>
-                        <div id="tab-playbook" class="tab-pane">
-                            <div id="tab-playbook-content"></div>
-                        </div>
-                        <div id="tab-remediations" class="tab-pane">
-                            <div id="tab-remediations-content"></div>
-                        </div>
+
+                        <!-- 6. Attack Chain, Playbook & Timeline -->
                         <div id="tab-timeline" class="tab-pane">
-                            <div id="tab-timeline-content"></div>
-                        </div>
-                        <div id="tab-telemetry" class="tab-pane">
-                            <div id="tab-telemetry-content"></div>
-                        </div>
-                        <div id="tab-dorks" class="tab-pane">
-                            <div id="tab-dorks-content"></div>
-                        </div>
-                        <div id="tab-wmn" class="tab-pane">
-                            <div id="tab-wmn-content"></div>
-                        </div>
-                        <div id="tab-images" class="tab-pane">
-                            <div id="tab-images-content"></div>
-                        </div>
-                        <div id="tab-telecom" class="tab-pane">
-                            <div id="tab-telecom-content"></div>
-                        </div>
-                        <div id="tab-pastes" class="tab-pane">
-                            <div id="tab-pastes-content"></div>
-                        </div>
-                        <div id="tab-ai" class="tab-pane">
-                            <div id="tab-ai-content"></div>
+                            <div id="tab-timeline-unified" style="display: flex; flex-direction: column; gap: 14px;">
+                                <div id="tab-playbook-content"></div>
+                                <div id="tab-timeline-content"></div>
+                                <div id="tab-remediations-content"></div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -709,6 +647,9 @@
                             </button>
                             <button type="button" id="btn-graph-physics" class="btn-tool" title="Toggle physics simulation">
                                 [PHYSICS: ON]
+                            </button>
+                            <button type="button" id="btn-graph-fullscreen" class="btn-tool" title="Toggle Fullscreen Graph View (Esc to exit)" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
+                                [FULLSCREEN]
                             </button>
                         </div>
                     </div>
@@ -779,6 +720,60 @@
         </div>
 
     </main>
+
+    <!-- Functions & Forensic Tools Hub Modal -->
+    <div id="tools-modal" class="modal-backdrop" style="display: none;" onclick="handleToolsModalBackdropClick(event)">
+        <div class="modal-dialog" style="max-width: 680px;">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <span class="modal-icon-badge mono text-sky-400">[FUNCTIONS]</span>
+                    <div>
+                        <h3 class="modal-title tracking-tight">Forensic Functions &amp; Utilities</h3>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono">
+                            Auxiliary Intelligence Engines &bull; Ingestion &bull; Multi-Target Analysis
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" onclick="closeToolsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="tools-grid">
+                    <div class="tool-launcher-card" onclick="launchTool('combolist')">
+                        <div class="tool-launcher-header">
+                            <span class="tool-launcher-tag mono text-sky-400">[01 // INGESTION]</span>
+                            <span class="tool-launcher-btn mono">LAUNCH &rarr;</span>
+                        </div>
+                        <h4 class="tool-launcher-title">Ingest Combolist</h4>
+                        <p class="tool-launcher-desc">Ingest raw breach dumps, email:pass lists, and stealer archives directly into the local threat intelligence store.</p>
+                    </div>
+                    <div class="tool-launcher-card" onclick="launchTool('phone')">
+                        <div class="tool-launcher-header">
+                            <span class="tool-launcher-tag mono text-emerald-400">[02 // TELECOM]</span>
+                            <span class="tool-launcher-btn mono">LAUNCH &rarr;</span>
+                        </div>
+                        <h4 class="tool-launcher-title">Reverse Phone Lookup</h4>
+                        <p class="tool-launcher-desc">Lookup international phone numbers across carriers, line types (mobile vs VOIP), and national registries.</p>
+                    </div>
+                    <div class="tool-launcher-card" onclick="launchTool('image')">
+                        <div class="tool-launcher-header">
+                            <span class="tool-launcher-tag mono text-purple-400">[03 // VISUAL]</span>
+                            <span class="tool-launcher-btn mono">LAUNCH &rarr;</span>
+                        </div>
+                        <h4 class="tool-launcher-title">Image Correlation</h4>
+                        <p class="tool-launcher-desc">Correlate target avatars and profile photos across multiple search engines and side-by-side comparison.</p>
+                    </div>
+                    <div class="tool-launcher-card" onclick="launchTool('batch')">
+                        <div class="tool-launcher-header">
+                            <span class="tool-launcher-tag mono text-amber-400">[04 // AUDIT]</span>
+                            <span class="tool-launcher-btn mono">LAUNCH &rarr;</span>
+                        </div>
+                        <h4 class="tool-launcher-title">Batch Exposure Audit</h4>
+                        <p class="tool-launcher-desc">Audit multiple target identifiers simultaneously to generate an enterprise-wide risk ledger.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Multi-Target Batch Audit Modal -->
     <div id="batch-modal" class="modal-backdrop" style="display: none;" onclick="handleBatchModalBackdropClick(event)">
@@ -1056,6 +1051,85 @@
             </div>
         </div>
     </div>
+
+    <!-- Floating Persistent AI Copilot Launcher Button -->
+    <div id="ai-copilot-floating-btn" class="ai-copilot-floating-btn" onclick="toggleAICopilotDrawer()" title="Open AI Threat Copilot">
+        <span class="copilot-pulse-dot"></span>
+        <span class="copilot-floating-text">AI AGENT</span>
+        <span id="copilot-unread-badge" class="copilot-unread-badge" style="display: none;">1</span>
+    </div>
+
+    <!-- AI Copilot Backdrop -->
+    <div id="ai-copilot-backdrop" class="ai-copilot-backdrop" onclick="closeAICopilotDrawer()"></div>
+
+    <!-- AI Copilot Side Drawer -->
+    <aside id="ai-copilot-drawer" class="ai-copilot-drawer" aria-label="AI Threat Copilot">
+        <!-- Drawer Header -->
+        <div class="copilot-drawer-header">
+            <div class="copilot-header-info">
+                <div class="copilot-title-row">
+                    <span class="status-btn-icon" style="background: #a855f7; box-shadow: 0 0 8px #a855f7;"></span>
+                    <h3 class="copilot-drawer-title">AI Forensic Copilot</h3>
+                </div>
+                <div class="copilot-engine-label" id="copilot-engine-label">Groq Llama 3.3 • Live Assistant</div>
+            </div>
+            <div class="copilot-header-actions">
+                <button type="button" class="btn-copilot-tool" onclick="openAISettingsModal()" title="AI Provider Settings">Settings</button>
+                <button type="button" id="btn-reanalyze-copilot" class="btn-copilot-tool btn-copilot-purple" onclick="reanalyzeCurrentAI()" title="Re-evaluate Intelligence">[RE-EVALUATE]</button>
+                <button type="button" class="btn-copilot-close" onclick="closeAICopilotDrawer()" title="Close Copilot">&times;</button>
+            </div>
+        </div>
+
+        <!-- Copilot Tab Switcher -->
+        <div class="copilot-tabs-nav">
+            <button type="button" id="copilot-tab-btn-dossier" class="copilot-tab-btn active" onclick="switchCopilotTab('dossier')">
+                EXECUTIVE DOSSIER
+            </button>
+            <button type="button" id="copilot-tab-btn-chat" class="copilot-tab-btn" onclick="switchCopilotTab('chat')">
+                INVESTIGATOR CHAT
+            </button>
+        </div>
+
+        <!-- Drawer Body -->
+        <div class="copilot-drawer-body">
+            <!-- 1. Executive Threat Dossier Tab Content -->
+            <div id="copilot-panel-dossier" class="copilot-panel active">
+                <div id="copilot-dossier-content" class="copilot-dossier-content">
+                    <div class="copilot-empty-state">
+                        <div class="copilot-empty-title">Awaiting Target Scan</div>
+                        <div class="copilot-empty-desc">Run an investigation query to synthesize an automated executive threat dossier.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Interactive Investigator Chat Tab Content -->
+            <div id="copilot-panel-chat" class="copilot-panel">
+                <div id="copilot-chat-messages" class="copilot-chat-messages">
+                    <div class="chat-bubble chat-ai">
+                        <div class="chat-bubble-author">AI AGENT</div>
+                        <div class="chat-bubble-body">
+                            I am your automated identity exposure copilot. Ask me about specific breach exposures, password vulnerability correlations, or defensive remediation steps for this target.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Prompt Chips -->
+                <div class="copilot-quick-prompts">
+                    <button type="button" class="copilot-chip" onclick="askCopilotPrompt('What are the most urgent risk exposures for this target?')">Top Exposures</button>
+                    <button type="button" class="copilot-chip" onclick="askCopilotPrompt('Explain the attack blast radius of the compromised passwords')">Password Blast Radius</button>
+                    <button type="button" class="copilot-chip" onclick="askCopilotPrompt('Generate a prioritized defensive action checklist for this identity')">Defensive Checklist</button>
+                </div>
+
+                <!-- Chat Input Row -->
+                <form id="copilot-chat-form" class="copilot-chat-input-row" onsubmit="handleCopilotSubmit(event)">
+                    <input type="text" id="copilot-chat-input" class="copilot-input-field" placeholder="Ask AI about this target..." autocomplete="off">
+                    <button type="submit" id="btn-copilot-send" class="btn-copilot-send">
+                        <span>Send</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </aside>
 
     <!-- Custom Application Logic -->
     <script src="/static/js/app.v17.js"></script>

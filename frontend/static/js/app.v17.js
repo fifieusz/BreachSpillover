@@ -14,88 +14,155 @@ let isHierarchicalView = false;
 /* ==========================================================================
    Retro 8-Bit Chiptune Audio Synthesizer (Web Audio API)
    Authentic DMG-01 GameBoy / Pokémon Style Sound FX
+   Instant (< 2ms) Response on User Interaction (PointerDown / Touch / Click)
    ========================================================================== */
 class RetroSoundEngine {
     constructor() {
         this.ctx = null;
-        this.enabled = localStorage.getItem("breachspillover_sfx") === "true";
+        this.enabled = localStorage.getItem("breachspillover_sfx") !== "false";
         this.volume = 0.09;
+        this.sampleVolume = 0.35;
+        this._buffers = {};
+        this._loading = {};
+        this._unlocked = false;
+        this._lastTactileTime = 0;
+
+        // Sound cues to pre-decode in memory
+        this._manifest = {
+            click: "/static/sounds/Clickingsound.mp3",
+            search: "/static/sounds/Searchingsound.mp3",
+            error: "/static/sounds/Errorsound.mp3",
+            export: "/static/sounds/Exportbuttonsound.mp3"
+        };
     }
 
-    init() {
+    _getCtx() {
         if (!this.ctx && (window.AudioContext || window.webkitAudioContext)) {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
             this.ctx = new AudioCtx();
         }
-        if (this.ctx && this.ctx.state === "suspended") {
-            this.ctx.resume();
+        return this.ctx;
+    }
+
+    init() {
+        const ctx = this._getCtx();
+        if (ctx && ctx.state === "suspended") {
+            ctx.resume().catch(() => {});
+        }
+        if (!this._unlocked) {
+            this._unlocked = true;
+            this.preloadBuffers();
         }
     }
 
-    toggle() {
-        this.enabled = !this.enabled;
-        try {
-            localStorage.setItem("breachspillover_sfx", this.enabled ? "true" : "false");
-        } catch (e) {}
-        this.updateButtonUI();
-        if (this.enabled) {
-            this.init();
-            this.playSelect();
-            if (typeof showToast === "function") showToast("8-Bit Retro Sound Effects ENABLED [POKÉMON MODE]", "success");
-        } else {
-            if (typeof showToast === "function") showToast("Sound Effects MUTED", "info");
+    preloadBuffers() {
+        const ctx = this._getCtx();
+        if (!ctx) return;
+        Object.entries(this._manifest).forEach(([key, url]) => {
+            if (this._buffers[key] || this._loading[key]) return;
+            this._loading[key] = true;
+            fetch(url)
+                .then(r => {
+                    if (!r.ok) throw new Error("HTTP error " + r.status);
+                    return r.arrayBuffer();
+                })
+                .then(ab => ctx.decodeAudioData(ab))
+                .then(audioBuffer => {
+                    let startOffset = 0;
+                    try {
+                        const data = audioBuffer.getChannelData(0);
+                        const threshold = 0.005;
+                        for (let i = 0; i < data.length; i++) {
+                            if (Math.abs(data[i]) > threshold) {
+                                startOffset = Math.max(0, (i - 16) / audioBuffer.sampleRate);
+                                break;
+                            }
+                        }
+                    } catch (e) {}
+                    this._buffers[key] = { buffer: audioBuffer, startOffset: startOffset };
+                    this._loading[key] = false;
+                })
+                .catch(() => {
+                    this._loading[key] = false;
+                });
+        });
+    }
+
+    playSample(key, fallbackFn) {
+        if (!this.enabled) return;
+        this.init();
+        const ctx = this._getCtx();
+        if (!ctx) return;
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
+
+        const item = this._buffers[key];
+        if (item && item.buffer) {
+            try {
+                const now = ctx.currentTime;
+                const source = ctx.createBufferSource();
+                const gain = ctx.createGain();
+                source.buffer = item.buffer;
+                gain.gain.setValueAtTime(this.sampleVolume, now);
+                source.connect(gain);
+                gain.connect(ctx.destination);
+                source.start(now, item.startOffset || 0);
+                return;
+            } catch (e) {}
         }
-        return this.enabled;
+
+        if (typeof fallbackFn === "function") {
+            fallbackFn();
+        }
     }
 
-    updateButtonUI() {
-        const btn = document.getElementById("btn-sfx-toggle");
-        const text = document.getElementById("sfx-toggle-text");
-        const icon = document.getElementById("sfx-toggle-icon");
-        if (btn) btn.classList.toggle("active", this.enabled);
-        if (text) text.innerText = this.enabled ? "ON" : "OFF";
-        if (icon) icon.innerText = "[SOUND]";
-    }
-
-    // Classic Pokémon Menu A-Button Select (quick square blip)
+    // Classic Pokémon Menu A-Button Select (quick square blip) - Instant < 1ms
     playSelect() {
         if (!this.enabled) return;
         this.init();
-        if (!this.ctx) return;
+        const ctx = this._getCtx();
+        if (!ctx) return;
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
         try {
-            const now = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
-            const gain = this.ctx.createGain();
+            const now = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
             osc.type = "square";
             osc.frequency.setValueAtTime(880, now);
-            osc.frequency.exponentialRampToValueAtTime(1320, now + 0.045);
+            osc.frequency.exponentialRampToValueAtTime(1320, now + 0.042);
             gain.gain.setValueAtTime(this.volume, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.048);
             osc.connect(gain);
-            gain.connect(this.ctx.destination);
+            gain.connect(ctx.destination);
             osc.start(now);
-            osc.stop(now + 0.05);
+            osc.stop(now + 0.048);
         } catch (e) {}
+    }
+
+    // Primary Click Sound: Immediate Web Audio playback
+    playClick() {
+        this.playSelect();
     }
 
     // Classic Pokémon Victory / Level-Up / Target Found Fanfare
     playVictory() {
         if (!this.enabled) return;
         this.init();
-        if (!this.ctx) return;
+        const ctx = this._getCtx();
+        if (!ctx) return;
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
         try {
-            const now = this.ctx.currentTime;
+            const now = ctx.currentTime;
             const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
             const stepTime = 0.065;
             notes.forEach((freq, idx) => {
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
                 osc.type = "square";
                 osc.frequency.setValueAtTime(freq, now + idx * stepTime);
                 gain.gain.setValueAtTime(this.volume, now + idx * stepTime);
                 gain.gain.exponentialRampToValueAtTime(0.001, now + (idx + 1) * stepTime);
                 osc.connect(gain);
-                gain.connect(this.ctx.destination);
+                gain.connect(ctx.destination);
                 osc.start(now + idx * stepTime);
                 osc.stop(now + (idx + 1) * stepTime);
             });
@@ -106,20 +173,22 @@ class RetroSoundEngine {
     playAlert() {
         if (!this.enabled) return;
         this.init();
-        if (!this.ctx) return;
+        const ctx = this._getCtx();
+        if (!ctx) return;
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
         try {
-            const now = this.ctx.currentTime;
+            const now = ctx.currentTime;
             const tones = [440, 660, 440, 880];
             const stepTime = 0.08;
             tones.forEach((freq, idx) => {
-                const osc = this.ctx.createOscillator();
-                const gain = this.ctx.createGain();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
                 osc.type = "sawtooth";
                 osc.frequency.setValueAtTime(freq, now + idx * stepTime);
                 gain.gain.setValueAtTime(this.volume * 0.9, now + idx * stepTime);
                 gain.gain.exponentialRampToValueAtTime(0.001, now + (idx + 1) * stepTime);
                 osc.connect(gain);
-                gain.connect(this.ctx.destination);
+                gain.connect(ctx.destination);
                 osc.start(now + idx * stepTime);
                 osc.stop(now + (idx + 1) * stepTime);
             });
@@ -130,101 +199,191 @@ class RetroSoundEngine {
     playInspect() {
         if (!this.enabled) return;
         this.init();
-        if (!this.ctx) return;
+        const ctx = this._getCtx();
+        if (!ctx) return;
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
         try {
-            const now = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
-            const gain = this.ctx.createGain();
+            const now = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
             osc.type = "triangle";
             osc.frequency.setValueAtTime(440, now);
             osc.frequency.exponentialRampToValueAtTime(880, now + 0.06);
             gain.gain.setValueAtTime(this.volume, now);
             gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
             osc.connect(gain);
-            gain.connect(this.ctx.destination);
+            gain.connect(ctx.destination);
             osc.start(now);
             osc.stop(now + 0.07);
         } catch (e) {}
+    }
+
+    // 8-bit Error Buzz
+    playErrorBuzz() {
+        if (!this.enabled) return;
+        this.init();
+        const ctx = this._getCtx();
+        if (!ctx) return;
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
+        try {
+            const now = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "sawtooth";
+            osc.frequency.setValueAtTime(140, now);
+            osc.frequency.setValueAtTime(110, now + 0.07);
+            gain.gain.setValueAtTime(this.volume * 0.8, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.18);
+        } catch (e) {}
+    }
+
+    toggle() {
+        return window.toggleSoundEffects();
+    }
+
+    updateButtonUI() {
+        const on = localStorage.getItem("breachspillover_sfx") !== "false";
+        this.enabled = on;
+        const btn = document.getElementById("btn-sfx-toggle");
+        const text = document.getElementById("sfx-toggle-text");
+        const icon = document.getElementById("sfx-toggle-icon");
+        if (btn) btn.classList.toggle("active", on);
+        if (text) text.innerText = on ? "SOUND: ON" : "SOUND: MUTED";
+        if (icon) {
+            icon.innerHTML = on ? `
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                </svg>
+            ` : `
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <line x1="23" y1="9" x2="17" y2="15"></line>
+                    <line x1="17" y1="9" x2="23" y2="15"></line>
+                </svg>
+            `;
+        }
     }
 }
 const sfx = new RetroSoundEngine();
 window.sfx = sfx;
 
 /* ==========================================================================
-   SoundManager — lightweight MP3 cue player (served from /static/sounds/)
-   Shares the existing SFX mute flag (localStorage "breachspillover_sfx").
-   Degrades silently if a file is missing so audio can never break the app.
+   SoundManager — Zero-latency audio router & Web Audio API sample player
    ========================================================================== */
 const SoundManager = {
-    _map: {
-        click: "/static/sounds/Clickingsound.mp3",
-        search: "/static/sounds/Searchingsound.mp3",
-        error: "/static/sounds/Errorsound.mp3",
-        export: "/static/sounds/Exportbuttonsound.mp3"
-    },
-    _audio: {},
     _lastPlayed: {},
 
     _enabled() {
-        // UI cue sounds are ON by default; only an explicit mute ("false") silences them.
         try {
-            return localStorage.getItem("breachspillover_ui_sounds") !== "false";
+            return localStorage.getItem("breachspillover_sfx") !== "false";
         } catch (e) {
             return true;
         }
     },
 
     toggle() {
-        let on = true;
-        try {
-            on = localStorage.getItem("breachspillover_ui_sounds") !== "false";
-            localStorage.setItem("breachspillover_ui_sounds", on ? "false" : "true");
-        } catch (e) {}
-        on = !on;
-        this.updateButtonUI();
-        if (on) this.play("click");
-        return on;
+        return window.toggleSoundEffects();
     },
 
     updateButtonUI() {
-        const on = this._enabled();
-        const text = document.getElementById("sfx-toggle-text");
-        const icon = document.getElementById("sfx-toggle-icon");
-        const btn = document.getElementById("btn-sfx-toggle");
-        if (text) text.innerText = on ? "ON" : "OFF";
-        if (icon) icon.innerText = "[SOUND]";
-        if (btn) btn.classList.toggle("active", on);
-    },
-
-    _get(key) {
-        if (!this._audio[key]) {
-            const el = new Audio(this._map[key]);
-            el.preload = "none";
-            el.addEventListener("error", () => {}, { once: false });
-            this._audio[key] = el;
-        }
-        return this._audio[key];
+        if (window.sfx) window.sfx.updateButtonUI();
     },
 
     play(key) {
-        if (!this._map[key] || !this._enabled()) return;
-        // Throttle: ignore repeats of the same cue within 150ms (rapid clicks).
+        if (!this._enabled() || !window.sfx) return;
         const now = Date.now();
-        if (now - (this._lastPlayed[key] || 0) < 150) return;
+
+        if (key === "click") {
+            // Deduplicate if immediate pointerdown tactile sound already fired for this interaction
+            if (now - (window.sfx._lastTactileTime || 0) < 100) return;
+            window.sfx._lastTactileTime = now;
+            window.sfx.playClick();
+            return;
+        }
+
+        // Throttle longer sound triggers
+        if (now - (this._lastPlayed[key] || 0) < 120) return;
         this._lastPlayed[key] = now;
-        try {
-            const el = this._get(key);
-            el.currentTime = 0;
-            const p = el.play();
-            if (p && typeof p.catch === "function") p.catch(() => {});
-        } catch (e) {
-            /* missing file / autoplay block — never surface to the user */
+
+        if (key === "search") {
+            window.sfx.playSample("search", () => window.sfx.playAlert());
+        } else if (key === "error") {
+            window.sfx.playSample("error", () => window.sfx.playErrorBuzz());
+        } else if (key === "export") {
+            window.sfx.playSample("export", () => window.sfx.playSelect());
+        } else {
+            window.sfx.playSample(key, () => window.sfx.playSelect());
         }
     }
 };
 window.SoundManager = SoundManager;
 function playSound(key) { SoundManager.play(key); }
 window.playSound = playSound;
+
+window.toggleSoundEffects = function() {
+    let current = true;
+    try {
+        current = localStorage.getItem("breachspillover_sfx") !== "false";
+    } catch(e) {}
+    const next = !current;
+    try {
+        localStorage.setItem("breachspillover_sfx", next ? "true" : "false");
+        localStorage.setItem("breachspillover_ui_sounds", next ? "true" : "false");
+    } catch(e) {}
+    if (window.sfx) {
+        window.sfx.enabled = next;
+        window.sfx.updateButtonUI();
+        if (next) {
+            window.sfx.init();
+            window.sfx.playSelect();
+        }
+    }
+    if (window.SoundManager) {
+        window.SoundManager.updateButtonUI();
+    }
+    if (typeof showToast === "function") {
+        showToast(next ? "Sound Effects ENABLED [ACTIVE]" : "Sound Effects MUTED", next ? "success" : "info");
+    }
+    return next;
+};
+
+// Immediate Tactile Click Feedback on pointerdown (0ms physical press response)
+window.addEventListener("pointerdown", (e) => {
+    if (!window.sfx) return;
+    window.sfx.init();
+
+    const target = e.target;
+    if (!target) return;
+
+    // Check if target or parent is an interactive UI element
+    const interactive = target.closest(
+        'button, .tab-btn, .btn-pivot-filter, .btn-cat-filter, .btn-action-tool, ' +
+        '.btn-tool, .btn-primary, .btn-secondary, .finding-card-clickable, ' +
+        '.copilot-chip, .copilot-tab-btn, .btn-mini-unlock, .tool-launcher-card, ' +
+        '.btn-modal-close, .btn-close-drawer, .breach-row, #ai-copilot-floating-btn, ' +
+        '[onclick], [role="button"]'
+    );
+
+    if (interactive && !interactive.disabled) {
+        window.sfx._lastTactileTime = Date.now();
+        window.sfx.playClick();
+    }
+}, { passive: true, capture: true });
+
+// Preload buffers on initial DOM readiness or first touch
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+        if (window.sfx) window.sfx.init();
+    });
+} else {
+    if (window.sfx) window.sfx.init();
+}
 
 /* ==========================================================================
    Dual Theme Color Palettes & Engine Controllers (Sleek Rounded Box Nodes)
@@ -1219,6 +1378,7 @@ function setupEventListeners() {
     const tabBtns = document.querySelectorAll(".tab-btn");
     tabBtns.forEach(btn => {
         btn.addEventListener("click", () => {
+            playSound("click");
             tabBtns.forEach(b => b.classList.remove("active"));
             document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
 
@@ -1312,6 +1472,67 @@ function setupEventListeners() {
         });
     }
 
+    // Fullscreen Toggle for Spillover Graph
+    const btnFullscreen = document.getElementById("btn-graph-fullscreen");
+    const graphPanel = document.querySelector(".graph-panel");
+
+    function updateFullscreenUI(isFullscreen) {
+        if (btnFullscreen) {
+            btnFullscreen.innerHTML = isFullscreen ? "[EXIT FULLSCREEN]" : "[FULLSCREEN]";
+            btnFullscreen.setAttribute("title", isFullscreen ? "Exit Fullscreen View (Esc)" : "Toggle Fullscreen Graph View (Esc to exit)");
+            btnFullscreen.style.color = isFullscreen ? "#f43f5e" : "#38bdf8";
+            btnFullscreen.style.borderColor = isFullscreen ? "rgba(244, 63, 94, 0.4)" : "rgba(56, 189, 248, 0.4)";
+        }
+        if (graphPanel) {
+            graphPanel.classList.toggle("graph-panel-fullscreen", isFullscreen);
+        }
+        if (networkInstance) {
+            setTimeout(() => {
+                networkInstance.setSize("100%", "100%");
+                networkInstance.fit({ animation: { duration: 300, easingFunction: "easeInOutQuad" } });
+            }, 80);
+        }
+    }
+
+    if (btnFullscreen && graphPanel) {
+        btnFullscreen.addEventListener("click", () => {
+            if (window.sfx) window.sfx.playSelect();
+            const isCurrentlyFullscreen = graphPanel.classList.contains("graph-panel-fullscreen") || document.fullscreenElement === graphPanel;
+            if (!isCurrentlyFullscreen) {
+                if (graphPanel.requestFullscreen) {
+                    graphPanel.requestFullscreen().then(() => {
+                        updateFullscreenUI(true);
+                    }).catch(() => {
+                        updateFullscreenUI(true);
+                    });
+                } else {
+                    updateFullscreenUI(true);
+                }
+            } else {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(() => {});
+                }
+                updateFullscreenUI(false);
+            }
+        });
+
+        document.addEventListener("fullscreenchange", () => {
+            const isNative = document.fullscreenElement === graphPanel;
+            if (!isNative && graphPanel.classList.contains("graph-panel-fullscreen")) {
+                updateFullscreenUI(false);
+            }
+        });
+
+        window.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && graphPanel.classList.contains("graph-panel-fullscreen")) {
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(() => {});
+                }
+                updateFullscreenUI(false);
+            }
+        });
+    }
+
     // Close Inspector Drawer
     const btnCloseInspector = document.getElementById("close-inspector");
     if (btnCloseInspector) {
@@ -1375,6 +1596,19 @@ function handleFindingCardClick(cardType) {
     if (targetTab) {
         const btn = document.querySelector(`.tab-btn[data-tab="${targetTab}"]`);
         if (btn) btn.click();
+        if (cardType === "workplace") {
+            setTimeout(() => {
+                if (typeof window.filterPivotCategory === "function") {
+                    window.filterPivotCategory("business");
+                }
+            }, 60);
+        } else if (cardType === "phone") {
+            setTimeout(() => {
+                if (typeof window.filterPivotCategory === "function") {
+                    window.filterPivotCategory("identity");
+                }
+            }, 60);
+        }
     }
 }
 window.handleFindingCardClick = handleFindingCardClick;
@@ -1479,7 +1713,7 @@ function triggerSearch() {
                                 <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;">Source: ${escapeHtml(data.source || 'Rainbow Table')} | Time: ${data.crack_time_seconds || 0.01}s</div>
                             </div>
                             <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #04131f; font-weight: 700; border: none; cursor: pointer; border-radius: 4px;" onclick="pivotOnEntity('CREDENTIAL', '${escapeHtml(data.plaintext)}')">
-                                ⚡ SEARCH TARGETS USING THIS PASSWORD
+                                [SEARCH TARGETS USING THIS PASSWORD]
                             </button>
                         `;
                         drawer.style.display = "flex";
@@ -1510,6 +1744,31 @@ function triggerSearch() {
         const domain = rawVal.replace(/^@/, "").trim();
         executeDomainRecon(domain);
         return;
+    }
+
+    // Composite query decomposition: detect combined queries like "Amir Secic 3gbxdd@gmail.com"
+    const emailMatch = rawVal.match(/[\w\.-]+@[\w\.-]+\.\w+/);
+    if (emailMatch) {
+        const extractedEmail = emailMatch[0].toLowerCase();
+        const remainder = rawVal.replace(emailMatch[0], "").replace(/[()<>,;:\[\]"']/g, " ").trim();
+        if (remainder && remainder.length >= 2 && /[a-zA-Z]/.test(remainder)) {
+            const anchorNameInput = document.getElementById("anchor-name");
+            if (anchorNameInput && (!anchorNameInput.value || anchorNameInput.value.trim() === "")) {
+                anchorNameInput.value = remainder;
+                showToast(`Anchor Detected: Name [${remainder}] linked to ${extractedEmail}`, "info");
+            }
+        }
+        currentEmail = extractedEmail;
+        executeInvestigation(currentEmail);
+        return;
+    }
+
+    if (!rawVal.includes("@") && rawVal.includes(" ")) {
+        const anchorNameInput = document.getElementById("anchor-name");
+        if (anchorNameInput && (!anchorNameInput.value || anchorNameInput.value.trim() === "")) {
+            anchorNameInput.value = rawVal;
+            showToast(`Person Target: [${rawVal}] activated for onomastic & OSINT search`, "info");
+        }
     }
 
     currentEmail = rawVal;
@@ -2040,19 +2299,16 @@ async function executeInvestigation(email) {
 
     try {
         let anchorQuery = "";
-        const isAnchorsEnabled = document.getElementById("toggle-extra-intel")?.checked;
-        if (isAnchorsEnabled) {
-            const aName = document.getElementById("anchor-name")?.value.trim();
-            const aUser = document.getElementById("anchor-username")?.value.trim();
-            const aPhone = document.getElementById("anchor-phone")?.value.trim();
-            const aCity = document.getElementById("anchor-city")?.value.trim();
-            if (aName) anchorQuery += `&known_name=${encodeURIComponent(aName)}`;
-            if (aUser) anchorQuery += `&known_username=${encodeURIComponent(aUser)}`;
-            if (aPhone) anchorQuery += `&known_phone=${encodeURIComponent(aPhone)}`;
-            if (aCity) anchorQuery += `&known_city=${encodeURIComponent(aCity)}`;
-        }
+        const aName = document.getElementById("anchor-name")?.value.trim();
+        const aUser = document.getElementById("anchor-username")?.value.trim();
+        const aPhone = document.getElementById("anchor-phone")?.value.trim();
+        const aCity = document.getElementById("anchor-city")?.value.trim();
+        if (aName) anchorQuery += `&known_name=${encodeURIComponent(aName)}`;
+        if (aUser) anchorQuery += `&known_username=${encodeURIComponent(aUser)}`;
+        if (aPhone) anchorQuery += `&known_phone=${encodeURIComponent(aPhone)}`;
+        if (aCity) anchorQuery += `&known_city=${encodeURIComponent(aCity)}`;
 
-        const url = `/api/search?email=${encodeURIComponent(email)}&audit_mode=${auditMode}${anchorQuery}`;
+        const url = `/api/search?email=${encodeURIComponent(email)}&audit_mode=${auditMode}&refresh=true${anchorQuery}`;
         const res = await fetch(url);
         
         if (!res.ok) {
@@ -2075,6 +2331,7 @@ async function executeInvestigation(email) {
         renderVectorsBreakdown(data.spillover_score);
         renderEvidenceTabs(data);
         renderGraph(data.graph);
+        renderAIReviewSection(data);
 
         // Feedback
         if (window.sfx) {
@@ -2175,59 +2432,57 @@ function renderResultsView(data, email) {
     if (targetCard) targetCard.style.display = "block";
 
     // Target Meta
-    const emp = data.employee;
-    const isPersonal = emp.job_title === "Personal Account" || ["@gmail.com", "@yahoo.com", "@outlook.com", "@hotmail.com", "@proton.me", "@protonmail.com", "@icloud.com"].some(d => (emp.corporate_email || email).toLowerCase().endsWith(d));
+    const emp = data.employee || {};
+    const hasRealName = emp.full_name && emp.full_name !== "Target User" && !emp.full_name.toLowerCase().startsWith("webmail");
+    const targetNameEl = document.getElementById("target-name");
+    const targetEmailEl = document.getElementById("target-email-display");
+    const avatarEl = document.getElementById("target-avatar");
 
-    if (isPersonal) {
-        const hasRealName = emp.full_name && emp.full_name !== "Target User" && !emp.full_name.toLowerCase().startsWith("webmail");
-        document.getElementById("target-name").innerText = hasRealName ? emp.full_name : (emp.corporate_email || email);
-        document.getElementById("target-title").innerText = emp.job_title && emp.job_title !== "Personal Account" ? emp.job_title : (hasRealName ? "Discovered Human Identity" : "Personal Account");
-        document.getElementById("target-dept").innerText = emp.department && !emp.department.startsWith("Domain @") ? emp.department : `Domain @${(emp.corporate_email || email).split("@")[1] || "webmail"}`;
-        document.getElementById("target-email-display").innerText = emp.corporate_email || email;
+    if (targetNameEl) targetNameEl.innerText = hasRealName ? emp.full_name : (emp.corporate_email || email);
+    if (targetEmailEl) targetEmailEl.innerText = emp.corporate_email || email;
+
+    if (avatarEl) {
         if (hasRealName) {
             const initials = emp.full_name.split(" ").filter(Boolean).map(n => n[0]).join("").substring(0, 2).toUpperCase();
-            document.getElementById("target-avatar").innerText = initials || "@";
+            avatarEl.innerText = initials || "@";
         } else {
-            document.getElementById("target-avatar").innerText = "@";
+            avatarEl.innerText = "@";
         }
-    } else {
-        document.getElementById("target-name").innerText = emp.full_name || "Target Identity";
-        document.getElementById("target-title").innerText = emp.job_title || "Individual";
-        document.getElementById("target-dept").innerText = emp.department || "Corporate Identity";
-        document.getElementById("target-email-display").innerText = emp.corporate_email || email;
-
-        const initials = (emp.full_name || "ID")
-            .split(" ")
-            .map(n => n[0])
-            .join("")
-            .substring(0, 2)
-            .toUpperCase();
-        document.getElementById("target-avatar").innerText = initials;
     }
 
-    // Spillover Score Calculation & Visualization
-    const scoreVal = data.spillover_score.score;
+    // Spillover Score Calculation & Visualization (Use Natural Risk Words, No Tiers)
+    const scoreVal = data.spillover_score ? (data.spillover_score.numeric_score ?? data.spillover_score.score) : 0;
+    const riskLevel = (data.spillover_score && data.spillover_score.level) ? data.spillover_score.level : "LOW";
     const scoreNumEl = document.getElementById("score-number");
+    const scoreNumericBadge = document.getElementById("score-numeric-badge");
+    const scoreLevelLabel = document.getElementById("score-level-label");
+
     if (scoreNumEl) {
-        scoreNumEl.innerText = scoreVal;
-        scoreNumEl.style.color = scoreVal === "Score 1" ? "#10b981" : data.spillover_score.color;
-        scoreNumEl.style.fontSize = "3.2rem";
+        scoreNumEl.innerText = riskLevel === "CLEAN" ? "CLEAN" : `${riskLevel} RISK`;
+        scoreNumEl.style.color = (riskLevel === "CLEAN") ? "#10b981" : (data.spillover_score.color || "#ef4444");
+        scoreNumEl.style.fontSize = "1.85rem";
+    }
+    if (scoreNumericBadge) {
+        scoreNumericBadge.innerText = `SCORE: ${scoreVal}/100`;
+    }
+    if (scoreLevelLabel) {
+        scoreLevelLabel.innerText = "RISK RATING";
     }
 
     const badgeEl = document.getElementById("severity-badge");
     if (badgeEl) {
-        if (scoreVal === "Score 1") {
+        if (riskLevel === "CLEAN" || scoreVal === 0) {
             badgeEl.className = "badge-pill badge-clean";
             badgeEl.innerText = "AUTHENTICATED CLEAN";
             badgeEl.style.borderColor = "#10b981";
             badgeEl.style.color = "#10b981";
             badgeEl.style.background = "rgba(16, 185, 129, 0.15)";
         } else {
-            badgeEl.className = `badge-pill ${data.spillover_score.badge_class}`;
-            badgeEl.innerText = `${data.spillover_score.level} RISK`;
-            badgeEl.style.borderColor = data.spillover_score.color;
-            badgeEl.style.color = data.spillover_score.color;
-            badgeEl.style.background = data.spillover_score.color + "22";
+            badgeEl.className = `badge-pill ${data.spillover_score.badge_class || 'badge-high'}`;
+            badgeEl.innerText = `${riskLevel} RISK`;
+            badgeEl.style.borderColor = data.spillover_score.color || "#ef4444";
+            badgeEl.style.color = data.spillover_score.color || "#ef4444";
+            badgeEl.style.background = (data.spillover_score.color || "#ef4444") + "22";
         }
     }
 
@@ -2245,115 +2500,236 @@ function renderResultsView(data, email) {
         }
     }
 
-    // Render Bento Overview Cards (Canonical 4 finding pillars)
+    // Render Bento Overview Cards (Multi-Item Finding Pillars)
     renderTargetOverview(data);
 }
 
 /**
- * 4 Key Findings Cards (Protected vs Declassified)
- * Always maintains consistent 4 Bento pillars: Credentials, Residential, Telecom, Household.
+ * 5 Key Findings Cards (Multi-Item Display)
+ * Pillars: Credentials, Geolocation, Telecom, Household, Workplace & Profiles.
  */
 function renderTargetOverview(data) {
     if (!data) return;
 
-    const pwdEl = document.getElementById("summary-password");
-    const srvEl = document.getElementById("summary-service");
+    // 1. Credentials & Hashes List
+    const credsList = document.getElementById("summary-creds-list");
     const badgeCreds = document.getElementById("badge-lock-creds");
-
-    const addrEl = document.getElementById("summary-address");
-    const cityEl = document.getElementById("summary-city");
-    const badgeAddr = document.getElementById("badge-lock-address");
-
-    const phoneEl = document.getElementById("summary-phone");
-    const privMailEl = document.getElementById("summary-priv-email");
-    const badgePhone = document.getElementById("badge-lock-phone");
-
-    const relEl = document.getElementById("summary-relative");
-    const relRoleEl = document.getElementById("summary-rel-role");
-    const badgeRel = document.getElementById("badge-lock-relative");
-
-    const workEl = document.getElementById("summary-workplace");
-    const workRoleEl = document.getElementById("summary-workplace-role");
-    const badgeWork = document.getElementById("badge-lock-workplace");
-
-    const hasCreds = data.credentials && data.credentials.length > 0;
-    const hasAddr = data.physical_footprints && data.physical_footprints.length > 0;
-    const phonePivot = (data.pivots || []).find(p => p.pivot_type === "PHONE_NUMBER" || (p.pivot_type && p.pivot_type.includes("PHONE")));
-    const hasPhone = Boolean(phonePivot);
-    const hasRels = data.relatives && data.relatives.length > 0;
-
-    const workPivot = (data.pivots || []).find(p => p.pivot_type === "WORKPLACE" || p.pivot_type === "EMPLOYER" || p.pivot_type === "ORGANIZATION");
-    const hasWorkDept = data.employee && data.employee.department && data.employee.department !== "—" && data.employee.department !== "Corporate" && data.employee.department !== "Unassigned" && !data.employee.department.startsWith("Domain @");
-    const hasWorkplace = Boolean(workPivot || hasWorkDept);
-
-    // 1. Password
-    if (hasCreds) {
-        const firstCred = data.credentials[0];
-        if (pwdEl) {
-            if (firstCred.plaintext_password) {
-                pwdEl.innerText = firstCred.plaintext_password;
-            } else if (firstCred.password_hash) {
-                pwdEl.innerHTML = `<span style="font-size: 0.74rem; word-break: break-all; color: #fde047; font-family: var(--font-mono);">${escapeHtml(firstCred.password_hash)}</span>`;
-            } else {
-                pwdEl.innerText = "Exfiltrated Credential Hash";
+    if (credsList) {
+        const creds = data.credentials || [];
+        if (creds.length > 0) {
+            if (badgeCreds) {
+                badgeCreds.innerText = `[${creds.length} EXPOSED]`;
+                badgeCreds.className = "badge-lock unlocked";
             }
+            credsList.innerHTML = creds.map(c => {
+                const val = c.plaintext_password || c.password_hash || "Exfiltrated Credential";
+                const service = c.domain_compromised || c.leak_name || "Breach Record";
+                const isHash = !c.plaintext_password && Boolean(c.password_hash);
+                return `
+                    <div class="finding-item-row">
+                        <div class="finding-item-top">
+                            <span class="finding-item-val mono" style="${isHash ? 'color: #fde047; font-size: 0.72rem;' : 'color: #f87171;'}">${escapeHtml(val)}</span>
+                            <span class="finding-item-badge">${escapeHtml(service)}</span>
+                        </div>
+                        ${c.username_or_email ? `<div class="finding-item-sub mono text-zinc-400">User: ${escapeHtml(c.username_or_email)}</div>` : ''}
+                    </div>
+                `;
+            }).join("");
+        } else {
+            if (badgeCreds) {
+                badgeCreds.innerText = "[CLEAN]";
+                badgeCreds.className = "badge-lock clean";
+            }
+            credsList.innerHTML = `<div class="finding-empty-val mono">Zero credentials exposed in indexed dumps</div>`;
         }
-        if (srvEl) srvEl.innerText = `Service: ${firstCred.domain_compromised || firstCred.leak_name || 'Breach Disclosure'}`;
-        if (badgeCreds) { badgeCreds.innerText = "[EXPOSED]"; badgeCreds.className = "badge-lock unlocked"; }
-    } else {
-        if (pwdEl) pwdEl.innerText = "Not Found";
-        if (srvEl) srvEl.innerText = "Zero credentials exposed in indexed breach dumps";
-        if (badgeCreds) { badgeCreds.innerText = "[NOT FOUND]"; badgeCreds.className = "badge-lock not-found"; }
     }
 
-    // 2. Residential Address
-    if (hasAddr) {
-        const firstFoot = data.physical_footprints[0];
-        if (addrEl) addrEl.innerText = firstFoot.address_line;
-        if (cityEl) cityEl.innerText = `${firstFoot.city || ''} (${firstFoot.country || 'Location Record'})`;
-        if (badgeAddr) { badgeAddr.innerText = "[RESIDENTIAL]"; badgeAddr.className = "badge-lock unlocked"; }
-    } else {
-        if (addrEl) addrEl.innerText = "Not Found";
-        if (cityEl) cityEl.innerText = "No residential coordinates or address records detected";
-        if (badgeAddr) { badgeAddr.innerText = "[NOT FOUND]"; badgeAddr.className = "badge-lock not-found"; }
+    // 2. Geolocation & Physical Coordinates (Corroborated Municipalities & Anchors)
+    const locList = document.getElementById("summary-locations-list");
+    const badgeAddr = document.getElementById("badge-lock-address");
+    if (locList) {
+        const footprints = [];
+        (data.physical_footprints || []).forEach(f => {
+            const city = (f.city || "").trim();
+            const country = (f.country || "").trim();
+            const addr = (f.address_line || "").trim();
+            const exp = (f.exposure_type || "").toUpperCase();
+
+            // Clean badge categorization
+            let badge = "RESIDENTIAL";
+            if (exp.includes("ACADEMIC") || addr.toLowerCase().includes("høgskolen") || addr.toLowerCase().includes("campus") || city.toLowerCase() === "halden") {
+                badge = "ACADEMIC CAMPUS";
+            } else if (exp.includes("ONOMASTIC") || addr.toLowerCase().includes("onomastic") || country.toLowerCase() === "poland" || city.toLowerCase() === "poland") {
+                badge = "ONOMASTIC HERITAGE";
+            } else if (exp.includes("RESIDENCE") || city.toLowerCase() === "sarpsborg") {
+                badge = "VERIFIED RESIDENCE";
+            } else if (country.toLowerCase() === "norway") {
+                badge = "NATIONAL ANCHOR";
+            }
+
+            let dispText = addr;
+            if (!dispText || dispText.toLowerCase().startsWith("geographic footprint:")) {
+                dispText = city && country ? `${city}, ${country}` : (city || country || "Verified Footprint");
+            }
+
+            footprints.push({
+                loc: dispText,
+                badge: badge,
+                key: `${city.toLowerCase()}|${country.toLowerCase()}`
+            });
+        });
+
+        const seen = new Set();
+        const uniqueLocs = footprints.filter(item => {
+            const k = item.key || item.loc.toLowerCase().trim();
+            if (seen.has(k) || !k) return false;
+            seen.add(k);
+            return true;
+        });
+
+        if (uniqueLocs.length > 0) {
+            if (badgeAddr) {
+                badgeAddr.innerText = `[${uniqueLocs.length} CORROBORATED]`;
+                badgeAddr.className = "badge-lock unlocked";
+            }
+            locList.innerHTML = uniqueLocs.map(l => `
+                <div class="finding-item-row">
+                    <div class="finding-item-top">
+                        <span class="finding-item-val">${escapeHtml(l.loc)}</span>
+                        <span class="finding-item-badge">${escapeHtml(l.badge)}</span>
+                    </div>
+                </div>
+            `).join("");
+        } else {
+            if (badgeAddr) {
+                badgeAddr.innerText = "[NOT DETECTED]";
+                badgeAddr.className = "badge-lock clean";
+            }
+            locList.innerHTML = `<div class="finding-empty-val">No residential coordinates detected</div>`;
+        }
     }
 
-    // 3. Telecom Line
-    if (phonePivot) {
-        if (phoneEl) phoneEl.innerText = phonePivot.pivot_value;
-        if (privMailEl) privMailEl.innerText = phonePivot.context_note || "Mobile telephone record";
-        if (badgePhone) { badgePhone.innerText = "[TELECOM]"; badgePhone.className = "badge-lock unlocked"; }
-    } else {
-        if (phoneEl) phoneEl.innerText = "Not Found";
-        if (privMailEl) privMailEl.innerText = "No telecom pivots or mobile phone numbers detected";
-        if (badgePhone) { badgePhone.innerText = "[NOT FOUND]"; badgePhone.className = "badge-lock not-found"; }
+    // 3. Telecom & Phone Lines
+    const phoneList = document.getElementById("summary-phones-list");
+    const badgePhone = document.getElementById("badge-lock-phone");
+    if (phoneList) {
+        const phones = (data.pivots || []).filter(p => p.pivot_type === "PHONE_NUMBER" || (p.pivot_type && p.pivot_type.includes("PHONE")) || p.pivot_value.startsWith("telecom:") || p.pivot_value.startsWith("+"));
+        if (phones.length > 0) {
+            if (badgePhone) {
+                badgePhone.innerText = `[${phones.length} TELECOM]`;
+                badgePhone.className = "badge-lock unlocked";
+            }
+            phoneList.innerHTML = phones.map(ph => {
+                const cleanVal = ph.pivot_value.replace(/^telecom:\s*/i, "");
+                const cleanCtx = (ph.context_note || "Carrier Mobile Line").replace(/\[STATUS:\s*VERIFIED\]/g, "").trim();
+                return `
+                    <div class="finding-item-row">
+                        <div class="finding-item-top">
+                            <span class="finding-item-val mono" style="color: #67e8f9;">${escapeHtml(cleanVal)}</span>
+                            <span class="finding-item-badge">E.164</span>
+                        </div>
+                        <div class="finding-item-sub mono text-zinc-400">${escapeHtml(cleanCtx)}</div>
+                    </div>
+                `;
+            }).join("");
+        } else {
+            if (badgePhone) {
+                badgePhone.innerText = "[NOT DETECTED]";
+                badgePhone.className = "badge-lock clean";
+            }
+            phoneList.innerHTML = `<div class="finding-empty-val mono">No telecom lines detected</div>`;
+        }
     }
 
-    // 4. Household Contact
-    if (hasRels) {
-        const firstRel = data.relatives[0];
-        if (relEl) relEl.innerText = firstRel.full_name;
-        if (relRoleEl) relRoleEl.innerText = `Relation: ${firstRel.relationship} (${firstRel.contact_phone || 'Phone linked'})`;
-        if (badgeRel) { badgeRel.innerText = "[HOUSEHOLD]"; badgeRel.className = "badge-lock unlocked"; }
-    } else {
-        if (relEl) relEl.innerText = "Not Found";
-        if (relRoleEl) relRoleEl.innerText = "No family or household co-habitants detected";
-        if (badgeRel) { badgeRel.innerText = "[NOT FOUND]"; badgeRel.className = "badge-lock not-found"; }
+    // 4. Household Cohabitants
+    const relList = document.getElementById("summary-relatives-list");
+    const badgeRel = document.getElementById("badge-lock-relative");
+    if (relList) {
+        const rels = data.relatives || [];
+        if (rels.length > 0) {
+            if (badgeRel) {
+                badgeRel.innerText = `[${rels.length} COHABITANTS]`;
+                badgeRel.className = "badge-lock unlocked";
+            }
+            relList.innerHTML = rels.map(r => `
+                <div class="finding-item-row">
+                    <div class="finding-item-top">
+                        <span class="finding-item-val">${escapeHtml(r.full_name)}</span>
+                        <span class="finding-item-badge">${escapeHtml(r.relationship || 'FAMILY')}</span>
+                    </div>
+                    ${r.contact_phone ? `<div class="finding-item-sub mono text-zinc-400">Line: ${escapeHtml(r.contact_phone)}</div>` : ''}
+                </div>
+            `).join("");
+        } else {
+            if (badgeRel) {
+                badgeRel.innerText = "[CLEAR]";
+                badgeRel.className = "badge-lock clean";
+            }
+            relList.innerHTML = `<div class="finding-empty-val">No cohabitants or family detected</div>`;
+        }
     }
 
-    // 5. Workplace & Employment
-    if (hasWorkplace) {
-        const companyDisplay = workPivot ? workPivot.pivot_value.replace(/^Employer:\s*/i, "") : (data.employee?.department || "Corporate Presence");
-        const roleDisplay = (data.employee?.job_title && data.employee.job_title !== "—") 
-            ? data.employee.job_title 
-            : (workPivot?.context_note ? workPivot.context_note.split('[')[0].trim() : "Professional Role");
-        if (workEl) workEl.innerText = companyDisplay;
-        if (workRoleEl) workRoleEl.innerText = `Role: ${roleDisplay}`;
-        if (badgeWork) { badgeWork.innerText = "[WORKPLACE]"; badgeWork.className = "badge-lock unlocked"; }
-    } else {
-        if (workEl) workEl.innerText = "Not Found";
-        if (workRoleEl) workRoleEl.innerText = "No corporate employer or workplace affiliations detected";
-        if (badgeWork) { badgeWork.innerText = "[NOT FOUND]"; badgeWork.className = "badge-lock not-found"; }
+    // 5. Workplace & Academic Career History (STRICTLY Work & Education, Profiles in Pivots)
+    const workList = document.getElementById("summary-workplace-list");
+    const badgeWork = document.getElementById("badge-lock-workplace");
+    if (workList) {
+        const workItems = [];
+        const workPivots = (data.pivots || []).filter(p => 
+            p.pivot_type === "WORKPLACE" || 
+            p.pivot_type === "EMPLOYER" || 
+            p.pivot_type === "EDUCATION" || 
+            p.pivot_type === "BUSINESS_ASSOCIATE"
+        );
+        workPivots.forEach(wp => {
+            const pv = wp.pivot_value || "";
+            if (pv.toLowerCase().includes("customs support")) return;
+            
+            let title = pv.replace(/^(Employer|Alma Mater|Co-partner|Workplace):\s*/i, "").trim();
+            let badge = "EMPLOYER";
+            const tLow = title.toLowerCase();
+            if (wp.pivot_type === "EDUCATION" || tLow.includes("høgskolen") || tLow.includes("universitet") || tLow.includes("bachelor") || tLow.includes("vgs")) {
+                badge = tLow.includes("bachelor") || tLow.includes("studium") ? "DEGREE" : "ACADEMIC";
+            } else if (wp.pivot_type === "BUSINESS_ASSOCIATE") {
+                badge = "CORPORATE";
+            } else if (tLow.includes("vikar") || tLow.includes("renholder") || tLow.includes("developer")) {
+                badge = "EXPERIENCE";
+            }
+
+            workItems.push({
+                title: title,
+                badge: badge
+            });
+        });
+
+        // Deduplicate work items
+        const seenWork = new Set();
+        const uniqueWork = workItems.filter(item => {
+            const k = item.title.toLowerCase().trim();
+            if (seenWork.has(k) || !k) return false;
+            seenWork.add(k);
+            return true;
+        });
+
+        if (uniqueWork.length > 0) {
+            if (badgeWork) {
+                badgeWork.innerText = `[${uniqueWork.length} AFFILIATIONS]`;
+                badgeWork.className = "badge-lock unlocked";
+            }
+            workList.innerHTML = uniqueWork.map(wi => `
+                <div class="finding-item-row">
+                    <div class="finding-item-top">
+                        <span class="finding-item-val">${escapeHtml(wi.title)}</span>
+                        <span class="finding-item-badge">${escapeHtml(wi.badge)}</span>
+                    </div>
+                </div>
+            `).join("");
+        } else {
+            if (badgeWork) {
+                badgeWork.innerText = "[NONE DETECTED]";
+                badgeWork.className = "badge-lock clean";
+            }
+            workList.innerHTML = `<div class="finding-empty-val">No verified employment or academic affiliations detected</div>`;
+        }
     }
 }
 
@@ -2612,12 +2988,16 @@ function renderEvidenceTabs(data) {
         }
     }
 
+    const targetFullName = (data.employee && data.employee.full_name) ? data.employee.full_name : "";
+
     // 3. Pivots & Public OSINT Footprint
     const allPivots = data.pivots || [];
     const rawSuspectedPivots = allPivots.filter(p => 
         p.pivot_type === "SUSPECTED_ACCOUNT" || 
         (p.context_note && p.context_note.includes("[STATUS: SUSPECTED]")) ||
-        (p.confidence_score !== undefined && p.confidence_score < 0.80 && p.pivot_type === "PUBLIC_PROFILE")
+        (p.context_note && p.context_note.includes("[PLATFORM: UNCONFIRMED]")) ||
+        (p.confidence_score !== undefined && p.confidence_score < 0.85 && p.pivot_type !== "EDUCATION" && p.pivot_type !== "WORKPLACE" && p.pivot_type !== "TIMELINE" && p.pivot_type !== "TECH_STACK" && p.pivot_type !== "FLAGSHIP_PROJECT") ||
+        (p.pivot_type === "PERSONA_PIVOT" && !p.pivot_value.toLowerCase().includes("esport") && !p.pivot_value.toLowerCase().includes("gamertag"))
     );
     const verifiedPivots = allPivots.filter(p => !rawSuspectedPivots.includes(p));
 
@@ -2649,6 +3029,103 @@ function renderEvidenceTabs(data) {
                     <div class="evidence-body" style="margin-top: 0.3rem;">No correlated personal phone numbers, secondary inboxes, or verified developer accounts confirmed.</div>
                 </div>`;
         } else {
+            function getPivotCategory(piv) {
+                const pt = piv.pivot_type || "";
+                const pv = (piv.pivot_value || "").toLowerCase();
+                const ctx = (piv.context_note || "").toLowerCase();
+                
+                // 1. Identity & Legal (Legal Name, Target Persona, Avatars, Phone/Telecom)
+                if (pt === "FULL_NAME" || pt === "PERSON_NAME" || pt === "AVATAR_CORRELATION" || pt === "PHONE_NUMBER" || pv.startsWith("telecom:") || pv.includes("+47") || pv.includes("+31") || pv.includes("+48") || pv.includes("+1")) {
+                    return "identity";
+                }
+                // 2. Business & Corporate (Employer, KvK, Partners, Education, Career Timeline)
+                if (pt === "WORKPLACE" || pt === "BUSINESS_ASSOCIATE" || pt === "EDUCATION" || pt === "TIMELINE" || pv.includes("employer:") || pv.includes("co-partner:") || pv.includes("alma mater:") || pv.includes("bachelor") || ctx.includes("kvk") || ctx.includes("chamber of commerce") || ctx.includes("drimble")) {
+                    return "business";
+                }
+                // 3. Technical & Keys (GitHub repos, Code stacks, Flagship projects, SSH/PGP keys, subdomains)
+                if (pt === "OPENPGP_KEY" || pt === "GITHUB_SSH_KEY" || pt === "TECH_STACK" || pt === "FLAGSHIP_PROJECT" || pt === "EMAIL_PERMUTATION" || pt === "SUBDOMAIN_ASSET" || pv.includes("repository") || pv.includes("ssh key") || pv.includes("pgp key") || pv.includes("core competencies") || pv.includes("flagship project")) {
+                    return "technical";
+                }
+                // 4. Profiles & Accounts (Unified: Gaming, Esports, Steam, Chess.com, Roblox, Twitter/X, Office365, Spotify, LinkedIn, Facebook, Telegram, etc.)
+                return "accounts";
+            }
+
+            const catCounts = { all: verifiedPivots.length, accounts: 0, identity: 0, business: 0, technical: 0 };
+            verifiedPivots.forEach(p => {
+                const cat = getPivotCategory(p);
+                catCounts[cat] = (catCounts[cat] || 0) + 1;
+            });
+
+            pivotsContainer.innerHTML = `
+                <div class="pivot-filter-chips">
+                    <button type="button" class="btn-pivot-filter active" data-pivot-filter="all" onclick="filterPivotCategory('all')">[ALL] <span class="filter-count">(${catCounts.all})</span></button>
+                    <button type="button" class="btn-pivot-filter" data-pivot-filter="accounts" onclick="filterPivotCategory('accounts')">[PROFILES &amp; ACCOUNTS] <span class="filter-count">(${catCounts.accounts})</span></button>
+                    <button type="button" class="btn-pivot-filter" data-pivot-filter="identity" onclick="filterPivotCategory('identity')">[IDENTITY &amp; LEGAL] <span class="filter-count">(${catCounts.identity})</span></button>
+                    <button type="button" class="btn-pivot-filter" data-pivot-filter="business" onclick="filterPivotCategory('business')">[WORK &amp; CAREER] <span class="filter-count">(${catCounts.business})</span></button>
+                    <button type="button" class="btn-pivot-filter" data-pivot-filter="technical" onclick="filterPivotCategory('technical')">[TECHNICAL &amp; REPOS] <span class="filter-count">(${catCounts.technical})</span></button>
+                </div>
+                <div id="pivot-cards-list"></div>
+            `;
+            const pivotCardsList = document.getElementById("pivot-cards-list");
+            const catBadgeStyles = {
+                identity: "background: rgba(6, 182, 212, 0.15); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.3);",
+                business: "background: rgba(245, 158, 11, 0.15); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.3);",
+                accounts: "background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);",
+                social: "background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);",
+                gaming: "background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);",
+                technical: "background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3);"
+            };
+            const catBadgeLabels = {
+                identity: "[IDENTITY]",
+                business: "[WORK & CAREER]",
+                accounts: "[PROFILES & ACCOUNTS]",
+                social: "[PROFILES & ACCOUNTS]",
+                gaming: "[PROFILES & ACCOUNTS]",
+                technical: "[TECHNICAL & REPOS]"
+            };
+            function addPivotCard(html, cat, contextNote = "") {
+                const bStyle = catBadgeStyles[cat] || catBadgeStyles.accounts;
+                const bLabel = catBadgeLabels[cat] || "[PROFILES & ACCOUNTS]";
+                const categoryPillHtml = `<span class="pivot-category-pill" style="${bStyle}">${bLabel}</span>`;
+                
+                // Extract any explicit tie attribution badge if present in the card HTML or contextNote
+                const fullText = (contextNote || "") + " " + html;
+                const tieMatch = fullText.match(/\[TIED:\s*([^\]]+)\]/);
+                let tiePillHtml = "";
+                if (tieMatch) {
+                    tiePillHtml = `<span class="pivot-tie-pill">[TIED: ${escapeHtml(tieMatch[1])}]</span>`;
+                }
+
+                // Embed category pill and tie pill cleanly into .evidence-header alongside .evidence-tag
+                let cardHtml = html;
+                if (cardHtml.includes('<span class="evidence-tag"')) {
+                    cardHtml = cardHtml.replace(
+                        /<span class="evidence-tag"([^>]*)>(.*?)<\/span>/s,
+                        `<div class="evidence-tags-group">${categoryPillHtml}${tiePillHtml}<span class="evidence-tag"$1>$2</span></div>`
+                    );
+                } else if (cardHtml.includes('<div class="evidence-header">')) {
+                    cardHtml = cardHtml.replace(
+                        '<div class="evidence-header">',
+                        `<div class="evidence-header"><div class="evidence-tags-group">${categoryPillHtml}${tiePillHtml}</div>`
+                    );
+                }
+
+                if (tieMatch) {
+                    cardHtml = cardHtml.replace(/\[TIED:\s*[^\]]+\]/g, "");
+                }
+
+                const wrappedHtml = `
+                    <div class="pivot-entry-card" data-pivot-cat="${cat}">
+                        ${cardHtml}
+                    </div>
+                `;
+                if (pivotCardsList) {
+                    pivotCardsList.innerHTML += wrappedHtml;
+                } else {
+                    pivotsContainer.innerHTML += wrappedHtml;
+                }
+            }
+
             verifiedPivots.forEach(piv => {
                 // Public OSINT Profile Cards (Gravatar, GitHub, Duolingo, Telegram, etc.)
                 if (piv.pivot_type === "PUBLIC_PROFILE" || piv.pivot_type === "ACCOUNT_REGISTRATION") {
@@ -2661,14 +3138,71 @@ function renderEvidenceTabs(data) {
                     if (url) {
                         try {
                             let parsedUrl = new URL(url);
-                            isRootDomain = (!parsedUrl.pathname || parsedUrl.pathname === "/" || parsedUrl.pathname === "");
+                            let host = parsedUrl.hostname.toLowerCase();
+                            let pathname = (parsedUrl.pathname || "").replace(/\/+$/, "");
+
+                            // Known generic platform root domains where a bare URL (pathname === "") is only a portal
+                            const genericRootPlatforms = [
+                                "facebook.com", "m.facebook.com", "www.facebook.com",
+                                "apple.com", "tv.apple.com",
+                                "wix.com", "www.wix.com",
+                                "wordpress.com", "www.wordpress.com",
+                                "office365.com", "office.com", "microsoft.com",
+                                "coursera.org", "www.coursera.org",
+                                "hackthebox.com", "www.hackthebox.com",
+                                "codecademy.com", "www.codecademy.com",
+                                "pinterest.com", "www.pinterest.com",
+                                "twitter.com", "x.com",
+                                "linkedin.com", "www.linkedin.com"
+                            ];
+
+                            // Subdomain hosts (e.g. jordinzwaan.jouwweb.nl, user.github.io, user.carrd.co, user.wixsite.com) are genuine user sites, NOT root portals
+                            let isUserSubdomain = host.includes(".jouwweb.nl") || 
+                                                  host.includes(".github.io") || 
+                                                  host.includes(".carrd.co") || 
+                                                  host.includes(".wixsite.com") || 
+                                                  host.includes(".pages.dev") || 
+                                                  host.includes(".vercel.app") || 
+                                                  host.includes(".netlify.app") || 
+                                                  host.includes(".blogspot.com") ||
+                                                  host.includes(".substack.com") ||
+                                                  (piv.pivot_value && piv.pivot_value.toLowerCase().includes("portfolio"));
+
+                            if (isUserSubdomain) {
+                                isRootDomain = false;
+                            } else if (genericRootPlatforms.includes(host)) {
+                                isRootDomain = (!pathname || pathname === "");
+                            } else {
+                                isRootDomain = (!pathname || pathname === "");
+                            }
                         } catch(e) {
                             isRootDomain = true;
                         }
                     }
 
-                    let isAccountPresenceOnly = piv.pivot_type === "ACCOUNT_REGISTRATION" || !piv.pivot_value.includes("@") || isRootDomain;
+                    // If URL is root or missing, check if handle is embedded in value or context
+                    if (isRootDomain || !url) {
+                        let handleMatch = piv.pivot_value.match(/@([a-zA-Z0-9_.-]+)/) || (piv.context_note && piv.context_note.match(/@([a-zA-Z0-9_.-]+)/));
+                        if (handleMatch) {
+                            let h = handleMatch[1];
+                            let platLower = piv.pivot_value.toLowerCase();
+                            if (platLower.includes("twitter") || platLower.includes("x:") || platLower.includes("x /")) {
+                                url = `https://x.com/${h}`;
+                                isRootDomain = false;
+                            } else if (platLower.includes("github")) {
+                                url = `https://github.com/${h}`;
+                                isRootDomain = false;
+                            } else if (platLower.includes("steam")) {
+                                url = `https://steamcommunity.com/id/${h}`;
+                                isRootDomain = false;
+                            }
+                        }
+                    }
+
+                    let isAccountPresenceOnly = (piv.pivot_type === "ACCOUNT_REGISTRATION") && ((!url) || isRootDomain);
                     let isDevProfile = piv.pivot_value.toLowerCase().includes("github") || piv.pivot_value.toLowerCase().includes("gitlab");
+                    let isSteam = piv.pivot_value.toLowerCase().includes("steam");
+                    let isPortfolio = piv.pivot_value.toLowerCase().includes("portfolio") || (url && url.toLowerCase().includes("jouwweb.nl"));
 
                     const platKey = normalizePlatform(piv.pivot_value);
                     const matchingCandidates = suspectedPivots.filter(sp => normalizePlatform(sp.pivot_value) === platKey);
@@ -2689,9 +3223,10 @@ function renderEvidenceTabs(data) {
                                         let cUrl = cLink ? cLink[1] : null;
                                         let cCtx = c.context_note ? c.context_note.replace(/\[URL:\s*https?:\/\/[^\]]+\]/, '').replace(/\[STATUS:\s*SUSPECTED\]\s*/, '').replace(/\[PLATFORM:\s*[^\]]+\]\s*/, '').trim() : "";
                                         if (cCtx.includes("Root stem derived from authenticated account login")) {
-                                            cCtx = cCtx.replace("Root stem derived from authenticated account login", "Stem match:");
+                                             cCtx = cCtx.replace("Root stem derived from authenticated account login", "Stem match:");
                                         }
                                         let cConf = Math.round((c.confidence_score || 0.6) * 100);
+                                        let inspectTargetUrl = cUrl || (platKey === 'twitter' ? `https://x.com/${c.pivot_value.replace(/[^a-zA-Z0-9_]/g, '')}` : '');
                                         return `
                                             <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 4px; padding: 0.4rem 0.6rem; gap: 0.5rem; flex-wrap: wrap;">
                                                 <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -2700,7 +3235,7 @@ function renderEvidenceTabs(data) {
                                                 </div>
                                                 <div style="display: flex; align-items: center; gap: 0.5rem;">
                                                     ${cCtx ? `<span style="font-size: 0.72rem; color: #94a3b8; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(cCtx)}</span>` : ''}
-                                                    ${cUrl ? `<a href="${escapeHtml(cUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); font-size: 0.7rem; padding: 2px 6px; text-decoration: none;">Inspect &rarr;</a>` : ''}
+                                                    ${inspectTargetUrl ? `<a href="${escapeHtml(inspectTargetUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); font-size: 0.7rem; padding: 2px 6px; text-decoration: none;">Inspect &rarr;</a>` : ''}
                                                 </div>
                                             </div>
                                         `;
@@ -2714,27 +3249,49 @@ function renderEvidenceTabs(data) {
                     let isLi = piv.pivot_value.toLowerCase().includes("linkedin");
                     let cardIcon = isDevProfile ? getUiIcon('github', 'w-4 h-4 text-sky-400') : (
                         isFb ? getUiIcon('facebook', 'w-4 h-4 text-blue-500') : (
-                            isLi ? getUiIcon('linkedin', 'w-4 h-4 text-sky-400') :
-                            getUiIcon('globe', 'w-4 h-4 text-purple-400')
+                            isLi ? getUiIcon('linkedin', 'w-4 h-4 text-sky-400') : (
+                                isSteam ? getUiIcon('globe', 'w-4 h-4 text-sky-400') : (
+                                    isPortfolio ? getUiIcon('globe', 'w-4 h-4 text-purple-400') :
+                                    getUiIcon('globe', 'w-4 h-4 text-purple-400')
+                                )
+                            )
                         )
                     );
-                    let cardBorder = isDevProfile ? '#38bdf8' : (isFb ? '#3b82f6' : (isLi ? '#0ea5e9' : (isAccountPresenceOnly ? '#a855f7' : '#38bdf8')));
+                    let cardBorder = isDevProfile ? '#38bdf8' : (
+                        isFb ? '#3b82f6' : (
+                            isLi ? '#0ea5e9' : (
+                                isSteam ? '#0284c7' : (
+                                    isPortfolio ? '#a855f7' : (
+                                        isAccountPresenceOnly ? '#a855f7' : '#38bdf8'
+                                    )
+                                )
+                            )
+                        )
+                    );
                     let tagStyle = isDevProfile ? 'background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #38bdf8;' : (
                         isFb ? 'background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);' : (
                             isLi ? 'background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3);' : (
-                                isAccountPresenceOnly ? 'background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);' : 'background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);'
+                                isSteam ? 'background: rgba(2, 132, 199, 0.15); color: #38bdf8; border: 1px solid rgba(2, 132, 199, 0.4);' : (
+                                    isPortfolio ? 'background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);' : (
+                                        isAccountPresenceOnly ? 'background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);' : 'background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);'
+                                    )
+                                )
                             )
                         )
                     );
                     let tagText = isDevProfile ? 'VERIFIED DEVELOPER ACCOUNT' : (
                         isFb ? 'VERIFIED FACEBOOK DOSSIER' : (
                             isLi ? 'VERIFIED LINKEDIN PROFILE' : (
-                                isAccountPresenceOnly ? 'EMAIL REGISTRATION VERIFIED' : 'LIVE OSINT PROFILE'
+                                isSteam ? 'VERIFIED STEAM PROFILE' : (
+                                    isPortfolio ? 'LIVE OSINT PROFILE' : (
+                                        isAccountPresenceOnly ? 'EMAIL REGISTRATION VERIFIED' : 'LIVE OSINT PROFILE'
+                                    )
+                                )
                             )
                         )
                     );
 
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid ${cardBorder};">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${cardIcon} ${escapeHtml(piv.pivot_value)}</span>
@@ -2743,21 +3300,32 @@ function renderEvidenceTabs(data) {
                             <div class="evidence-body">
                                 <div><strong>Intelligence Signal:</strong> ${escapeHtml(cleanContext || (isAccountPresenceOnly ? 'Account registration confirmed on service' : 'Corroborated public footprint'))}</div>
                                 ${!isAccountPresenceOnly && url ? `
-                                    <div style="margin-top: 0.5rem;">
-                                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: ${isFb ? '#60a5fa' : '#38bdf8'}; border-color: rgba(56, 189, 248, 0.4); text-decoration: none;">View Verified Profile &rarr;</a>
+                                    <div style="margin-top: 0.65rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-verified-profile-link">
+                                            <span>View Verified Profile &rarr;</span>
+                                            <span class="mono opacity-70 text-[11px]">${escapeHtml(url)}</span>
+                                        </a>
+                                        <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(url)}', 'Profile URL')">Copy URL</button>
                                     </div>
                                 ` : `
-                                    <div style="margin-top: 0.5rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
-                                        <span style="font-size: 0.76rem; color: #94a3b8; display: inline-flex; align-items: center; gap: 0.35rem;">
-                                            ${getUiIcon('lock', 'w-3 h-3 text-purple-400')} Handle obscured by platform API
-                                        </span>
+                                    <div style="margin-top: 0.65rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+                                        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                                            <span style="font-size: 0.76rem; color: #94a3b8; display: inline-flex; align-items: center; gap: 0.35rem;">
+                                                ${getUiIcon('lock', 'w-3 h-3 text-purple-400')} Registered on platform (handle masked by API)
+                                            </span>
+                                            ${(platKey === 'twitter' && targetFullName) ? `
+                                                <a href="https://x.com/search?q=${encodeURIComponent(targetFullName)}&f=user" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 8px;">
+                                                    Search "${escapeHtml(targetFullName)}" on X &rarr;
+                                                </a>
+                                            ` : ''}
+                                        </div>
                                         ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color: #64748b; font-size: 0.74rem; text-decoration: underline;">Platform Portal &rarr;</a>` : ''}
                                     </div>
                                 `}
                                 ${candidateHandlesHtml}
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
@@ -2765,7 +3333,7 @@ function renderEvidenceTabs(data) {
                 if (piv.pivot_type === "FULL_NAME" || piv.pivot_type === "PERSON_NAME") {
                     const rawVal = piv.pivot_value.replace(/^Full Name:\s*/i, '').trim();
                     let cleanCtx = piv.context_note ? piv.context_note.replace(/\[STATUS:\s*VERIFIED\]\s*/g, '').trim() : '';
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #06b6d4;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-2">
@@ -2783,12 +3351,12 @@ function renderEvidenceTabs(data) {
                                 </div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 if (piv.pivot_type === "OPENPGP_KEY") {
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #10b981;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${getUiIcon("key", "w-4 h-4 text-emerald-400")} OpenPGP Public Key Found</span>
@@ -2799,12 +3367,12 @@ function renderEvidenceTabs(data) {
                                 <div style="margin-top: 0.3rem;"><strong>Context:</strong> ${escapeHtml(piv.context_note || '')}</div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 if (piv.pivot_type === "ALTERNATE_EMAIL") {
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #06b6d4;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${getUiIcon("mail", "w-4 h-4 text-cyan-400")} ${escapeHtml(piv.pivot_value)}</span>
@@ -2816,13 +3384,13 @@ function renderEvidenceTabs(data) {
                                 </div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 // Semantic Career, Education & Technical Stack Cards
                 if (piv.pivot_type === "EDUCATION") {
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #3b82f6;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${getUiIcon("building", "w-4 h-4 text-blue-400")} ${escapeHtml(piv.pivot_value)}</span>
@@ -2832,12 +3400,12 @@ function renderEvidenceTabs(data) {
                                 <div><strong>Academic Context:</strong> ${escapeHtml(piv.context_note || '')}</div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 if (piv.pivot_type === "WORKPLACE") {
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #f59e0b;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${getUiIcon("building", "w-4 h-4 text-amber-400")} ${escapeHtml(piv.pivot_value)}</span>
@@ -2847,12 +3415,12 @@ function renderEvidenceTabs(data) {
                                 <div><strong>Professional Details:</strong> ${escapeHtml(piv.context_note || '')}</div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 if (piv.pivot_type === "FLAGSHIP_PROJECT") {
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #a855f7;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${getUiIcon("globe", "w-4 h-4 text-purple-400")} ${escapeHtml(piv.pivot_value)}</span>
@@ -2862,12 +3430,12 @@ function renderEvidenceTabs(data) {
                                 <div><strong>Scope & Tech:</strong> ${escapeHtml(piv.context_note || '')}</div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 if (piv.pivot_type === "TECH_STACK") {
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #06b6d4;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${getUiIcon("cpu", "w-4 h-4 text-cyan-400")} ${escapeHtml(piv.pivot_value)}</span>
@@ -2877,12 +3445,12 @@ function renderEvidenceTabs(data) {
                                 <div><strong>Extracted Profile Stack:</strong> ${escapeHtml(piv.context_note || '')}</div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 if (piv.pivot_type === "PERSONA_PIVOT") {
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #c084fc;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5" style="color: #d8b4fe;">${getUiIcon("userCheck", "w-4 h-4 text-purple-400")} ${escapeHtml(piv.pivot_value)}</span>
@@ -2895,7 +3463,7 @@ function renderEvidenceTabs(data) {
                                 </div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
@@ -2904,7 +3472,7 @@ function renderEvidenceTabs(data) {
                     const borderCol = isHigh ? "#ef4444" : "#f59e0b";
                     const tagCol = isHigh ? "rgba(239, 68, 68, 0.15)" : "rgba(245, 158, 11, 0.15)";
                     const textCol = isHigh ? "#f87171" : "#fbbf24";
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid ${borderCol};">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${getUiIcon("building", "w-4 h-4 text-amber-400")} ${escapeHtml(piv.pivot_value)}</span>
@@ -2917,12 +3485,12 @@ function renderEvidenceTabs(data) {
                                 </div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 if (piv.pivot_type === "EMAIL_PERMUTATION") {
-                    pivotsContainer.innerHTML += `
+                    addPivotCard(`
                         <div class="evidence-card" style="border-left: 3px solid #818cf8;">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-1.5">${getUiIcon("mail", "w-4 h-4 text-indigo-400")} ${escapeHtml(piv.pivot_value)}</span>
@@ -2932,35 +3500,146 @@ function renderEvidenceTabs(data) {
                                 <div><strong>Enterprise Schemes:</strong> ${escapeHtml(piv.context_note || 'Generated corporate format patterns')}</div>
                             </div>
                         </div>
-                    `;
+                    `, getPivotCategory(piv), piv.context_note);
                     return;
                 }
 
                 if (piv.pivot_type === "TIMELINE") {
                     return;
                 }
+
+                // Dedicated Business Associate / Partner Card
+                if (piv.pivot_type === "BUSINESS_ASSOCIATE") {
+                    let cleanCtx = piv.context_note ? piv.context_note.replace(/\[STATUS:\s*VERIFIED\]\s*/g, '').trim() : '';
+                    let partnerName = piv.pivot_value.replace(/^(Co-Partner|Business Partner|Associate):\s*/i, '').trim();
+                    addPivotCard(`
+                        <div class="evidence-card" style="border-left: 3px solid #f59e0b;">
+                            <div class="evidence-header">
+                                <span class="evidence-title flex items-center gap-2">
+                                    ${getUiIcon('users', 'w-4 h-4 text-amber-400')}
+                                    <span class="text-zinc-400 font-mono text-xs uppercase tracking-wider">Business Associate:</span>
+                                    <span class="text-zinc-100 font-semibold">${escapeHtml(partnerName)}</span>
+                                </span>
+                                <span class="evidence-tag" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
+                                    KVK VERIFIED (${Math.round((piv.confidence_score || 0.98) * 100)}%)
+                                </span>
+                            </div>
+                            <div class="evidence-body">
+                                <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+                                    <div style="font-size: 0.8rem; color: #94a3b8;">
+                                        <strong>Corporate Partnership:</strong> ${escapeHtml(cleanCtx || 'Verified co-partner in corporate registry.')}
+                                    </div>
+                                    <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(partnerName)}', 'Partner Name')">Copy</button>
+                                </div>
+                            </div>
+                        </div>
+                    `, getPivotCategory(piv), piv.context_note);
+                    return;
+                }
+
+                // Dedicated Cross-Platform Avatar Correlation Card
+                if (piv.pivot_type === "AVATAR_CORRELATION") {
+                    let avatarUrlMatch = piv.pivot_value.match(/(https?:\/\/[^\s]+)/) || (piv.context_note && piv.context_note.match(/(https?:\/\/[^\s]+)/));
+                    let avatarUrl = avatarUrlMatch ? avatarUrlMatch[1].replace(/\]$/, '') : "";
+                    let cleanCtx = piv.context_note ? piv.context_note.replace(/\[URL:\s*https?:\/\/[^\]]+\]/, '').replace(/\[STATUS:\s*VERIFIED\]\s*/g, '').trim() : '';
+                    let platformName = avatarUrl.includes("github") ? "GitHub" : (avatarUrl.includes("gravatar") ? "Gravatar" : "Public Platform");
+                    addPivotCard(`
+                        <div class="evidence-card" style="border-left: 3px solid #8b5cf6;">
+                            <div class="evidence-header">
+                                <span class="evidence-title flex items-center gap-2">
+                                    ${getUiIcon('user', 'w-4 h-4 text-purple-400')}
+                                    <span class="text-zinc-400 font-mono text-xs uppercase tracking-wider">Avatar Identity:</span>
+                                    <span class="text-zinc-100 font-semibold">${escapeHtml(platformName)} Visual Asset</span>
+                                </span>
+                                <span class="evidence-tag" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3);">
+                                    AVATAR CORRELATION (${Math.round((piv.confidence_score || 0.92) * 100)}%)
+                                </span>
+                            </div>
+                            <div class="evidence-body">
+                                <div style="display: flex; align-items: center; gap: 0.9rem; margin-top: 0.25rem;">
+                                    ${avatarUrl ? `
+                                        <div style="flex-shrink: 0; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(139, 92, 246, 0.4); background: #0f172a;">
+                                            <img src="${escapeHtml(avatarUrl)}" alt="Avatar Footprint" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">
+                                        </div>
+                                    ` : ''}
+                                    <div style="flex: 1; min-width: 0;">
+                                        <div style="font-size: 0.8rem; color: #94a3b8;">
+                                            <strong>Visual Signal:</strong> ${escapeHtml(cleanCtx || 'Visual avatar footprint discovered on public repository.')}
+                                        </div>
+                                        ${avatarUrl ? `
+                                            <div style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                                                <a href="${escapeHtml(avatarUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #a78bfa; border-color: rgba(139, 92, 246, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 7px;">Open Image &rarr;</a>
+                                                <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(avatarUrl)}', 'Avatar URL')">Copy URL</button>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `, getPivotCategory(piv), piv.context_note);
+                    return;
+                }
+
+                // Dedicated Telecom / Phone Number Card
+                if (piv.pivot_type === "PHONE_NUMBER") {
+                    let cleanCtx = piv.context_note ? piv.context_note.replace(/\[STATUS:\s*VERIFIED\]\s*/g, '').trim() : '';
+                    let waMatch = piv.context_note ? piv.context_note.match(/\[Direct WhatsApp:\s*(https?:\/\/[^\]]+)\]/) : null;
+                    let waUrl = waMatch ? waMatch[1] : null;
+                    addPivotCard(`
+                        <div class="evidence-card" style="border-left: 3px solid #10b981;">
+                            <div class="evidence-header">
+                                <span class="evidence-title flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-emerald-400 inline-block align-middle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                                    <span class="text-zinc-400 font-mono text-xs uppercase tracking-wider">Telecom Line:</span>
+                                    <span class="text-zinc-100 font-semibold font-mono">${escapeHtml(piv.pivot_value)}</span>
+                                </span>
+                                <span class="evidence-tag" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                    TELECOM VERIFIED (${Math.round((piv.confidence_score || 0.95) * 100)}%)
+                                </span>
+                            </div>
+                            <div class="evidence-body">
+                                <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+                                    <div style="font-size: 0.8rem; color: #94a3b8;">
+                                        <strong>Carrier Signal:</strong> ${escapeHtml(cleanCtx || 'Verified cellular line attributed to subject.')}
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 0.4rem;">
+                                        ${waUrl ? `<a href="${escapeHtml(waUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #4ade80; border-color: rgba(34, 197, 94, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 7px;">Message WhatsApp &rarr;</a>` : ''}
+                                        <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(piv.pivot_value)}', 'Phone')">Copy</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `, getPivotCategory(piv), piv.context_note);
+                    return;
+                }
+
+                // General Fallback Evidence Card (with human-readable label and icon)
                 let waMatch = piv.context_note ? piv.context_note.match(/\[Direct WhatsApp:\s*(https?:\/\/[^\]]+)\]/) : null;
                 let waUrl = waMatch ? waMatch[1] : null;
+                let humanType = (piv.pivot_type || "SIGNAL").replace(/_/g, ' ');
                 let pivotValHtml = `
                     <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
-                        <div class="code-field" style="color: #67e8f9; font-weight: 700; font-size: 1rem;">${escapeHtml(piv.pivot_value)}</div>
+                        <div class="code-field" style="color: #67e8f9; font-weight: 700; font-size: 0.95rem;">${escapeHtml(piv.pivot_value)}</div>
                         ${waUrl ? `<a href="${escapeHtml(waUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #4ade80; border-color: rgba(34, 197, 94, 0.4); text-decoration: none;">Message WhatsApp &rarr;</a>` : ''}
                         <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(piv.pivot_value)}', 'Pivot')">Copy</button>
                     </div>
                 `;
 
-                pivotsContainer.innerHTML += `
-                    <div class="evidence-card">
+                addPivotCard(`
+                    <div class="evidence-card" style="border-left: 3px solid #06b6d4;">
                         <div class="evidence-header">
-                            <span class="evidence-title">[${escapeHtml(piv.pivot_type)}]</span>
-                            <span class="evidence-tag" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9; border: 1px solid #06b6d4;">Confidence: ${Math.round(piv.confidence_score * 100)}%</span>
+                            <span class="evidence-title flex items-center gap-1.5">
+                                ${getUiIcon("shield", "w-3.5 h-3.5 text-cyan-400")}
+                                <span class="font-mono text-xs uppercase tracking-wider text-zinc-300">${escapeHtml(humanType)}</span>
+                            </span>
+                            <span class="evidence-tag" style="background: rgba(6, 182, 212, 0.15); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.3);">CONFIDENCE: ${Math.round((piv.confidence_score || 0.8) * 100)}%</span>
                         </div>
                         <div class="evidence-body">
                             ${pivotValHtml}
-                            <div style="margin-top: 0.4rem;"><strong>Context:</strong> ${escapeHtml(piv.context_note || '')}</div>
+                            <div style="margin-top: 0.4rem; font-size: 0.8rem; color: #94a3b8;"><strong>Context:</strong> ${escapeHtml(piv.context_note || '')}</div>
                         </div>
                     </div>
-                `;
+                `, getPivotCategory(piv), piv.context_note);
             });
 
             if (suspectedPivots.length > 0) {
@@ -3493,14 +4172,14 @@ window.highlightPlaybookStage = function(element) {
         if (timelineList.length === 0) {
             timelineContainer.innerHTML = `
                 <div class="evidence-card" style="border-left: 3px solid #10b981;">
-                    <div class="evidence-title" style="color: #34d399;">⏳ No Chronological Milestones Detected</div>
+                    <div class="evidence-title" style="color: #34d399;">No Chronological Milestones Detected</div>
                     <div class="evidence-body" style="margin-top: 0.3rem;">No dated career, education, repository, or breach exposure events were recovered for this target.</div>
                 </div>`;
         } else {
             let timelineHtml = `
                 <div class="timeline-container">
                     <div class="timeline-header-bar">
-                        <span class="timeline-header-title mono">⏳ IDENTITY & SECURITY INCIDENT EVOLUTION</span>
+                        <span class="timeline-header-title mono">IDENTITY &amp; SECURITY INCIDENT EVOLUTION</span>
                         <span class="badge-pill badge-neutral mono">${timelineList.length} CHRONOLOGICAL MILESTONES</span>
                     </div>
                     <div class="timeline-track">
@@ -3862,7 +4541,7 @@ async function triggerWMNScan() {
 
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = `<span class="animate-spin inline-block mr-1">⌛</span> Scanning...`;
+        btn.innerHTML = `<span class="animate-spin inline-block mr-1">[*]</span> Scanning...`;
     }
     if (wrapper) {
         wrapper.innerHTML = `
@@ -4068,7 +4747,7 @@ async function triggerPastesScan() {
 
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = `<span class="animate-spin inline-block mr-1">⌛</span> Scanning...`;
+        btn.innerHTML = `<span class="animate-spin inline-block mr-1">[*]</span> Scanning...`;
     }
     if (wrapper) {
         wrapper.innerHTML = `
@@ -4958,11 +5637,11 @@ function renderNodeInspector(nodeId) {
         <div style="margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
             ${(pivotValue && (pivotType || node.data?.can_pivot)) ? `
                 <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #04131f; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(56, 189, 248, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="pivotOnEntity('${escapeHtml(pivotType)}', '${escapeHtml(pivotValue)}')">
-                    ⚡ PIVOT ON THIS ENTITY (${escapeHtml(pivotType || 'INVESTIGATE')})
+                    [PIVOT ON THIS ENTITY: ${escapeHtml(pivotType || 'INVESTIGATE')}]
                 </button>
             ` : ''}
             <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(16, 185, 129, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="expandGraphFromNode('${escapeHtml(nodeId)}', '${escapeHtml(pivotType)}', '${escapeHtml(pivotValue)}')">
-                🌐 EXPAND GRAPH FROM NODE (+)
+                [EXPAND GRAPH FROM NODE (+)]
             </button>
         </div>
     `;
@@ -4994,7 +5673,7 @@ function pivotOnEntity(pivotType, pivotValue) {
                     if (bodyEl) {
                         const crackHtml = `
                             <div style="margin-top: 0.75rem; padding: 0.7rem; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px;">
-                                <div style="color: #34d399; font-weight: 700; font-size: 0.82rem;">🔓 RESOLVED PLAINTEXT PASSWORD</div>
+                                <div style="color: #34d399; font-weight: 700; font-size: 0.82rem;">[RESOLVED PLAINTEXT PASSWORD]</div>
                                 <div style="font-size: 1.1rem; font-weight: 700; color: var(--t-primary); margin-top: 0.3rem; font-family: 'JetBrains Mono', monospace;">${escapeHtml(data.plaintext)}</div>
                                 <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 0.3rem;">Algorithm: ${escapeHtml(data.algorithm || 'MD5')} | Source: ${escapeHtml(data.source || 'Rainbow Table')}</div>
                             </div>
@@ -5094,7 +5773,7 @@ async function expandGraphFromNode(nodeId, pivotType, pivotValue) {
         if (bodyEl) {
             const expBadge = `
                 <div style="margin-top: 0.6rem; padding: 0.4rem 0.6rem; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 4px; font-size: 0.72rem; color: #34d399; font-family: 'JetBrains Mono', monospace;">
-                    ✓ Attached ${newNodes.length} lateral hops to canvas
+                    [+] Attached ${newNodes.length} lateral hops to canvas
                 </div>
             `;
             bodyEl.insertAdjacentHTML("beforeend", expBadge);
@@ -5106,14 +5785,55 @@ async function expandGraphFromNode(nodeId, pivotType, pivotValue) {
 window.expandGraphFromNode = expandGraphFromNode;
 
 /**
+ * Functions & Forensic Tools Hub Modal Controllers
+ */
+function openToolsModal() {
+    playSound("click");
+    const modal = document.getElementById("tools-modal");
+    if (modal) modal.style.display = "flex";
+}
+window.openToolsModal = openToolsModal;
+
+function closeToolsModal() {
+    playSound("click");
+    const modal = document.getElementById("tools-modal");
+    if (modal) modal.style.display = "none";
+}
+window.closeToolsModal = closeToolsModal;
+
+function handleToolsModalBackdropClick(event) {
+    if (event.target && event.target.id === "tools-modal") {
+        closeToolsModal();
+    }
+}
+window.handleToolsModalBackdropClick = handleToolsModalBackdropClick;
+
+function launchTool(toolName) {
+    playSound("click");
+    closeToolsModal();
+    if (toolName === "combolist" && typeof openCombolistModal === "function") {
+        openCombolistModal();
+    } else if (toolName === "phone" && typeof openReversePhoneModal === "function") {
+        openReversePhoneModal();
+    } else if (toolName === "image" && typeof openImageCorrelationModal === "function") {
+        openImageCorrelationModal();
+    } else if (toolName === "batch" && typeof openBatchModal === "function") {
+        openBatchModal();
+    }
+}
+window.launchTool = launchTool;
+
+/**
  * Combolist Ingestion Modal Controllers
  */
 function openCombolistModal() {
+    playSound("click");
     const modal = document.getElementById("combolist-modal");
     if (modal) modal.style.display = "flex";
 }
 
 function closeCombolistModal() {
+    playSound("click");
     const modal = document.getElementById("combolist-modal");
     if (modal) modal.style.display = "none";
 }
@@ -5473,37 +6193,98 @@ async function testAIKeyConnection() {
     }
 }
 
-async function renderAITab(data, forceRefresh = false) {
-    const container = document.getElementById("tab-ai-content");
-    if (!container) return;
+/* ==========================================================================
+   AI Forensic Copilot: Side Drawer, Executive Dossier & Interactive Chat
+   ========================================================================== */
 
-    if (!data) {
-        container.innerHTML = `
-            <div class="evidence-card" style="border-left: 3px solid #a855f7;">
-                <div class="evidence-title flex items-center gap-1.5" style="color: #d8b4fe;">${getUiIcon("cpu", "w-4 h-4 text-purple-400")} AI Threat Intelligence Engine</div>
-                <div class="evidence-body" style="margin-top: 0.3rem;">Run a target search to synthesize an automated executive threat dossier.</div>
-            </div>
-        `;
-        return;
+let copilotChatHistory = [];
+
+window.toggleAICopilotDrawer = function() {
+    playSound("click");
+    const drawer = document.getElementById("ai-copilot-drawer");
+    const backdrop = document.getElementById("ai-copilot-backdrop");
+    const badge = document.getElementById("copilot-unread-badge");
+    if (!drawer) return;
+    const isOpen = drawer.classList.contains("open");
+    if (isOpen) {
+        drawer.classList.remove("open");
+        if (backdrop) backdrop.classList.remove("active");
+    } else {
+        drawer.classList.add("open");
+        if (backdrop) backdrop.classList.add("active");
+        if (badge) badge.style.display = "none";
     }
+};
+
+window.openAICopilotDrawer = function() {
+    playSound("click");
+    const drawer = document.getElementById("ai-copilot-drawer");
+    const backdrop = document.getElementById("ai-copilot-backdrop");
+    const badge = document.getElementById("copilot-unread-badge");
+    if (drawer) drawer.classList.add("open");
+    if (backdrop) backdrop.classList.add("active");
+    if (badge) badge.style.display = "none";
+};
+
+window.closeAICopilotDrawer = function() {
+    playSound("click");
+    const drawer = document.getElementById("ai-copilot-drawer");
+    const backdrop = document.getElementById("ai-copilot-backdrop");
+    if (drawer) drawer.classList.remove("open");
+    if (backdrop) backdrop.classList.remove("active");
+};
+
+window.switchCopilotTab = function(tabName) {
+    playSound("click");
+    const btnDossier = document.getElementById("copilot-tab-btn-dossier");
+    const btnChat = document.getElementById("copilot-tab-btn-chat");
+    const panelDossier = document.getElementById("copilot-panel-dossier");
+    const panelChat = document.getElementById("copilot-panel-chat");
+
+    if (tabName === "dossier") {
+        if (btnDossier) btnDossier.classList.add("active");
+        if (btnChat) btnChat.classList.remove("active");
+        if (panelDossier) panelDossier.classList.add("active");
+        if (panelChat) panelChat.classList.remove("active");
+    } else {
+        if (btnChat) btnChat.classList.add("active");
+        if (btnDossier) btnDossier.classList.remove("active");
+        if (panelChat) panelChat.classList.add("active");
+        if (panelDossier) panelDossier.classList.remove("active");
+        const input = document.getElementById("copilot-chat-input");
+        if (input) setTimeout(() => input.focus(), 150);
+    }
+};
+
+async function renderAIReviewSection(data, forceRefresh = false) {
+    const container = document.getElementById("copilot-dossier-content") || document.getElementById("ai-review-body");
+    const engineLabelEl = document.getElementById("copilot-engine-label");
+    const unreadBadge = document.getElementById("copilot-unread-badge");
+    const drawer = document.getElementById("ai-copilot-drawer");
+
+    if (!data) return;
 
     if (currentAIDossier && !forceRefresh) {
         renderAIDossierContent(currentAIDossier, data);
         return;
     }
 
-    // Show loading state
-    container.innerHTML = `
-        <div style="padding: 24px; text-align: center; background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px;">
-            <div style="margin-bottom: 10px; display: inline-block;"><div class="stats-dot" style="width: 14px; height: 14px; background: #a855f7; box-shadow: 0 0 12px #a855f7;"></div></div>
-            <div style="font-size: 0.95rem; font-weight: 700; color: var(--t-primary); font-family: 'JetBrains Mono', monospace;">
-                Synthesizing AI Forensic Threat Dossier...
+    // Show loading state in dossier panel
+    if (container) {
+        container.innerHTML = `
+            <div style="padding: 28px 16px; text-align: center; background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 8px;">
+                <div style="margin-bottom: 12px; display: inline-block;">
+                    <div class="stats-dot" style="width: 14px; height: 14px; background: #a855f7; box-shadow: 0 0 14px #a855f7;"></div>
+                </div>
+                <div style="font-size: 0.92rem; font-weight: 700; color: var(--t-primary); font-family: 'JetBrains Mono', monospace;">
+                    Synthesizing AI Forensic Dossier...
+                </div>
+                <div style="font-size: 0.76rem; color: #94a3b8; margin-top: 8px; line-height: 1.45;">
+                    Connecting to ${getAIProvider().toUpperCase()} (Llama 3.3 / Gemini) • Evaluating multi-vector breach correlations
+                </div>
             </div>
-            <div style="font-size: 0.78rem; color: #94a3b8; margin-top: 6px;">
-                Connecting to ${getAIProvider().toUpperCase()} (Llama 3.3 / Gemini) • Correlating multi-vector spillover and persona matches
-            </div>
-        </div>
-    `;
+        `;
+    }
 
     try {
         const resp = await fetch("/api/ai/dossier", {
@@ -5520,23 +6301,44 @@ async function renderAITab(data, forceRefresh = false) {
         const dossier = await resp.json();
         currentAIDossier = dossier;
         renderAIDossierContent(dossier, data);
+
+        if (unreadBadge && (!drawer || !drawer.classList.contains("open"))) {
+            unreadBadge.style.display = "inline-block";
+        }
     } catch (e) {
-        container.innerHTML = `
-            <div class="evidence-card" style="border-left: 3px solid #ef4444;">
-                <div class="evidence-title flex items-center gap-1.5" style="color: #f87171;">${getUiIcon("alert", "w-4 h-4 text-rose-400")} AI Dossier Generation Error</div>
-                <div class="evidence-body" style="margin-top: 0.3rem; color: var(--t-secondary);">${escapeHtml(e.message)}</div>
-                <div style="margin-top: 10px;">
-                    <button type="button" class="btn-tool" onclick="renderAITab(currentInvestigationData, true)" style="color: #c084fc; border-color: #a855f7;">
-                        Retry Generation &rarr;
-                    </button>
+        if (container) {
+            container.innerHTML = `
+                <div class="evidence-card" style="border-left: 3px solid #ef4444;">
+                    <div class="evidence-title flex items-center gap-1.5" style="color: #f87171;">
+                        ${getUiIcon("alert", "w-4 h-4 text-rose-400")} AI Dossier Generation Error
+                    </div>
+                    <div class="evidence-body" style="margin-top: 0.4rem; color: var(--t-secondary); overflow-wrap: anywhere; word-break: break-word;">
+                        ${escapeHtml(e.message)}
+                    </div>
+                    <div style="margin-top: 12px;">
+                        <button type="button" class="btn-copilot-tool btn-copilot-purple" onclick="renderAIReviewSection(currentInvestigationData, true)">
+                            Retry Generation &rarr;
+                        </button>
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        }
     }
 }
+window.renderAIReviewSection = renderAIReviewSection;
+
+function renderAITab(data, forceRefresh = false) {
+    return renderAIReviewSection(data, forceRefresh);
+}
+window.renderAITab = renderAITab;
+
+window.reanalyzeCurrentAI = function() {
+    playSound("click");
+    renderAIReviewSection(currentInvestigationData, true);
+};
 
 function renderAIDossierContent(dossier, scanData) {
-    const container = document.getElementById("tab-ai-content");
+    const container = document.getElementById("copilot-dossier-content") || document.getElementById("ai-review-body");
     if (!container) return;
 
     const isLiveAI = dossier.is_ai_generated;
@@ -5544,70 +6346,74 @@ function renderAIDossierContent(dossier, scanData) {
     const engineLabel = dossier.engine_label || (isLiveAI ? `${provider} (${dossier.model || 'LLM'})` : 'Deterministic CTI Heuristic Synthesizer (Offline)');
     const notice = dossier.notice;
 
+    const engineLabelEl = document.getElementById("copilot-engine-label");
+    if (engineLabelEl) engineLabelEl.innerText = engineLabel;
+
     const personas = dossier.persona_analysis || dossier.persona_disambiguation || [];
     const attackSim = dossier.adversary_attack_simulation || {};
     const remediations = dossier.prioritized_remediations || [];
 
+    // Parse verdict: never let long sentence explanation blowout pill badge
+    const rawVerdict = (dossier.threat_level_verdict || "").trim();
+    let verdictPill = "THREAT EVALUATED";
+    let verdictExplanation = "";
+    if (rawVerdict.length > 25) {
+        verdictPill = rawVerdict.split(" ")[0].toUpperCase() + " RISK";
+        verdictExplanation = rawVerdict;
+    } else if (rawVerdict.length > 0) {
+        verdictPill = rawVerdict.toUpperCase();
+    }
+
     let noticeHtml = "";
     if (notice) {
         noticeHtml = `
-            <div style="margin-bottom: 12px; padding: 10px 14px; background: rgba(245, 158, 11, 0.1); border-left: 3px solid #f59e0b; border-radius: 4px; display: flex; align-items: center; justify-content: space-between;">
-                <span style="font-size: 0.76rem; color: #fde68a;">[INFO] ${escapeHtml(notice)}</span>
-                <button type="button" class="btn-tool" onclick="openAISettingsModal()" style="color: #fbbf24; border-color: #f59e0b; font-size: 0.7rem; padding: 3px 8px; white-space: nowrap;">
-                    Configure AI Key &rarr;
+            <div style="margin-bottom: 12px; padding: 10px 12px; background: rgba(245, 158, 11, 0.1); border-left: 3px solid #f59e0b; border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <span style="font-size: 0.74rem; color: #fde68a; overflow-wrap: anywhere; word-break: break-word;">[INFO] ${escapeHtml(notice)}</span>
+                <button type="button" class="btn-copilot-tool" onclick="openAISettingsModal()" style="color: #fbbf24; border-color: #f59e0b; font-size: 0.68rem; padding: 2px 6px; white-space: nowrap;">
+                    Configure Key &rarr;
                 </button>
             </div>
         `;
     }
 
     container.innerHTML = `
-        <!-- Header Controls Bar -->
-        <div style="margin-bottom: 14px; padding: 12px 16px; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px;">
+        <!-- Assessment Overview Card -->
+        <div style="margin-bottom: 12px; padding: 12px 14px; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px; min-width: 0;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span class="badge-pill mono" style="background: rgba(168, 85, 247, 0.2); color: #d8b4fe; border-color: #a855f7; font-size: 0.72rem;">
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <span class="badge-pill mono" style="background: rgba(168, 85, 247, 0.2); color: #d8b4fe; border-color: #a855f7; font-size: 0.68rem;">
                         ${escapeHtml(engineLabel)}
                     </span>
-                    <span class="badge-pill mono" style="background: rgba(56, 189, 248, 0.15); color: #7dd3fc; border-color: #38bdf8; font-size: 0.72rem;">
-                        ${escapeHtml(dossier.threat_level_verdict || 'THREAT ASSESSMENT EVALUATED')}
+                    <span class="badge-pill mono" style="background: rgba(56, 189, 248, 0.15); color: #7dd3fc; border-color: #38bdf8; font-size: 0.68rem;">
+                        ${escapeHtml(verdictPill)}
                     </span>
                 </div>
-                <div style="display: flex; gap: 8px;">
-                    <button type="button" class="btn-tool" onclick="openAISettingsModal()" style="font-size: 0.72rem; padding: 4px 10px; color: var(--t-secondary); border-color: var(--b-subtle);">
-                        AI Settings
-                    </button>
-                    <button type="button" class="btn-tool" onclick="renderAITab(currentInvestigationData, true)" style="color: #c084fc; border-color: #a855f7; font-size: 0.72rem; padding: 4px 10px;">
-                        Re-analyze
-                    </button>
-                </div>
             </div>
+            ${verdictExplanation ? `
+                <div style="margin-top: 10px; font-size: 0.78rem; color: #e0f2fe; line-height: 1.5; overflow-wrap: anywhere; word-break: break-word; background: rgba(56, 189, 248, 0.05); padding: 8px 10px; border-radius: 4px; border-left: 2px solid #38bdf8;">
+                    ${escapeHtml(verdictExplanation)}
+                </div>
+            ` : ''}
         </div>
 
         ${noticeHtml}
 
         <!-- 1. Executive Threat Summary -->
-        <div class="evidence-card" style="border-left: 3px solid #a855f7; margin-bottom: 14px;">
-            <div class="evidence-title" style="color: #d8b4fe; font-size: 0.92rem; display: flex; align-items: center; gap: 6px;">
+        <div class="evidence-card" style="border-left: 3px solid #a855f7; margin-bottom: 12px;">
+            <div class="evidence-title" style="color: #d8b4fe; font-size: 0.88rem;">
                 EXECUTIVE FORENSIC SYNTHESIS
             </div>
-            <div class="evidence-body" style="margin-top: 0.6rem; font-size: 0.82rem; color: var(--t-primary); line-height: 1.6; white-space: pre-line;">
+            <div class="evidence-body" style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--t-primary); line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; word-break: break-word;">
                 ${escapeHtml(dossier.executive_summary || 'No summary available.')}
             </div>
         </div>
 
-        <!-- 2. Persona & Alias Disambiguation -->
-        <div class="evidence-card" style="border-left: 3px solid #38bdf8; margin-bottom: 14px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                <div class="evidence-title" style="color: #7dd3fc; font-size: 0.92rem; display: flex; align-items: center; gap: 6px;">
-                    IDENTITY &amp; CANDIDATE ACCOUNT ATTRIBUTION
-                </div>
-                <span class="mono" style="font-size: 0.7rem; color: #94a3b8;">SEMANTIC ALIAS VERIFICATION</span>
+        <!-- 2. Candidate Persona Attribution -->
+        <div class="evidence-card" style="border-left: 3px solid #38bdf8; margin-bottom: 12px;">
+            <div class="evidence-title" style="color: #7dd3fc; font-size: 0.88rem; margin-bottom: 6px;">
+                IDENTITY &amp; CANDIDATE ATTRIBUTION
             </div>
-            <div style="font-size: 0.75rem; color: var(--t-secondary); margin-bottom: 10px;">
-                AI evaluates candidate profiles against ground-truth signals (creation dates, locations, linguistic cues) to differentiate true personal accounts from vanity name collisions.
-            </div>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px;">
+            <div style="display: flex; flex-direction: column; gap: 8px;">
                 ${personas.length > 0 ? personas.map(p => {
                     const status = (p.status || "").toUpperCase();
                     let badgeStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981;";
@@ -5616,227 +6422,179 @@ function renderAIDossierContent(dossier, scanData) {
 
                     const pct = Math.round((parseFloat(p.probability_score || 0.8)) * 100);
                     return `
-                        <div style="background: var(--c-elevated); border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px 12px;">
-                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                                <span class="mono" style="font-weight: 700; color: var(--t-primary); font-size: 0.82rem;">${escapeHtml(p.platform)}: ${escapeHtml(p.handle_or_identifier)}</span>
-                                <span class="badge-pill mono" style="${badgeStyle} font-size: 0.65rem;">${pct}% CONF</span>
+                        <div style="background: var(--c-elevated); border: 1px solid var(--b-hairline); border-radius: 6px; padding: 8px 10px; min-width: 0;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; flex-wrap: wrap; gap: 4px;">
+                                <span class="mono" style="font-weight: 700; color: var(--t-primary); font-size: 0.78rem;">${escapeHtml(p.platform)}: ${escapeHtml(p.handle_or_identifier)}</span>
+                                <span class="badge-pill mono" style="${badgeStyle} font-size: 0.62rem;">${pct}% CONF</span>
                             </div>
-                            <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 4px; line-height: 1.4;">
+                            <div style="font-size: 0.72rem; color: #94a3b8; line-height: 1.4; overflow-wrap: anywhere; word-break: break-word;">
                                 ${escapeHtml(p.reasoning || '')}
                             </div>
                         </div>
                     `;
-                }).join("") : `<div style="font-size: 0.78rem; color: #94a3b8; grid-column: 1/-1;">No unverified persona candidates indexed. Accounts are corroborated via direct email bindings.</div>`}
+                }).join("") : `<div style="font-size: 0.75rem; color: #94a3b8;">No unverified persona collisions indexed. Accounts are confirmed via direct email binding.</div>`}
             </div>
         </div>
 
         <!-- 3. Adversary Attack Simulation -->
-        <div class="evidence-card" style="border-left: 3px solid #f43f5e; margin-bottom: 14px;">
-            <div class="evidence-title" style="color: #fda4af; font-size: 0.92rem; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+        <div class="evidence-card" style="border-left: 3px solid #f43f5e; margin-bottom: 12px;">
+            <div class="evidence-title" style="color: #fda4af; font-size: 0.88rem; margin-bottom: 8px;">
                 ADVERSARY ATTACK SIMULATION
             </div>
-
-            <div style="display: grid; grid-template-columns: 1fr; gap: 10px;">
-                <div style="background: rgba(244, 63, 94, 0.06); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 6px; padding: 10px 14px;">
-                    <div class="mono" style="font-size: 0.78rem; font-weight: 700; color: #fb7185; margin-bottom: 4px;">
-                        Target-Specific Spear-Phishing Pretext:
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="background: rgba(244, 63, 94, 0.06); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 6px; padding: 8px 12px; min-width: 0;">
+                    <div class="mono" style="font-size: 0.74rem; font-weight: 700; color: #fb7185; margin-bottom: 4px;">
+                        Target Spear-Phishing Pretext:
                     </div>
-                    <div style="font-size: 0.78rem; color: var(--t-secondary); line-height: 1.5;">
+                    <div style="font-size: 0.76rem; color: var(--t-secondary); line-height: 1.45; overflow-wrap: anywhere; word-break: break-word;">
                         ${escapeHtml(attackSim.spear_phishing_pretext || 'Pretext evaluation pending.')}
                     </div>
                 </div>
 
-                <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 6px; padding: 10px 14px;">
-                    <div class="mono" style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; margin-bottom: 4px;">
+                <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 6px; padding: 8px 12px; min-width: 0;">
+                    <div class="mono" style="font-size: 0.74rem; font-weight: 700; color: #fbbf24; margin-bottom: 4px;">
                         Credential-Stuffing Blast Radius:
                     </div>
-                    <div style="font-size: 0.78rem; color: var(--t-secondary); line-height: 1.5;">
+                    <div style="font-size: 0.76rem; color: var(--t-secondary); line-height: 1.45; overflow-wrap: anywhere; word-break: break-word;">
                         ${escapeHtml(attackSim.credential_stuffing_blast_radius || 'Blast radius evaluation pending.')}
-                    </div>
-                </div>
-
-                <div style="background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 6px; padding: 10px 14px;">
-                    <div class="mono" style="font-size: 0.78rem; font-weight: 700; color: #38bdf8; margin-bottom: 4px;">
-                        Household &amp; Social Engineering Vectors:
-                    </div>
-                    <div style="font-size: 0.78rem; color: var(--t-secondary); line-height: 1.5;">
-                        ${escapeHtml(attackSim.household_social_engineering_vector || 'Household vector evaluation pending.')}
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- 3b. Credential Mutation & Pattern Vulnerability Surface -->
-        ${(() => {
-            const mut = dossier.credential_mutation_analysis;
-            if (!mut) return '';
-            const score = mut.mutation_risk_score || 50;
-            const scoreColor = score >= 70 ? '#f43f5e' : (score >= 40 ? '#f59e0b' : '#10b981');
-            return `
-                <div class="evidence-card" style="border-left: 3px solid #f43f5e; margin-bottom: 14px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
-                        <div class="evidence-title" style="color: #fda4af; font-size: 0.92rem; display: flex; align-items: center; gap: 6px;">
-                            CREDENTIAL REUSE &amp; MUTATION ATTACK SURFACE
-                        </div>
-                        <span class="badge-pill mono" style="background: rgba(244, 63, 94, 0.15); color: ${scoreColor}; border: 1px solid ${scoreColor}; font-size: 0.72rem;">
-                            MUTATION RISK: ${score}/100
-                        </span>
-                    </div>
-                    <div style="font-size: 0.75rem; color: var(--t-secondary); margin-bottom: 10px;">
-                        AI analysis of exposed password semantics, base vocabulary, and predictable year/season rolling schemes.
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr; gap: 8px;">
-                        <div style="background: var(--c-elevated); border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px 14px;">
-                            <div class="mono" style="font-size: 0.78rem; font-weight: 700; color: #fb7185; margin-bottom: 4px;">
-                                Detected Base Pattern Scheme:
-                            </div>
-                            <div style="font-size: 0.8rem; color: var(--t-primary); font-family: monospace;">
-                                ${escapeHtml(mut.base_pattern_detected || 'N/A')}
-                            </div>
-                            <div style="font-size: 0.76rem; color: #94a3b8; margin-top: 4px;">
-                                ${escapeHtml(mut.mutation_risk_verdict || '')}
-                            </div>
-                        </div>
-                        <div style="background: var(--c-elevated); border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px 14px;">
-                            <div class="mono" style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; margin-bottom: 4px;">
-                                Corporate Gateway Cross-Reuse Assessment:
-                            </div>
-                            <div style="font-size: 0.78rem; color: var(--t-secondary); line-height: 1.5;">
-                                ${escapeHtml(mut.corporate_cross_reuse_assessment || '')}
-                            </div>
-                        </div>
-                        <div style="background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 6px; padding: 10px 14px;">
-                            <div class="mono" style="font-size: 0.78rem; font-weight: 700; color: #34d399; margin-bottom: 4px;">
-                                Defensive Hardening Guidance:
-                            </div>
-                            <div style="font-size: 0.78rem; color: #a7f3d0; line-height: 1.5;">
-                                ${escapeHtml(mut.defensive_hardening_guidance || '')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        })()}
-
         <!-- 4. Prioritized Remediations -->
-        <div class="evidence-card" style="border-left: 3px solid #10b981; margin-bottom: 14px;">
-            <div class="evidence-title" style="color: #6ee7b7; font-size: 0.92rem; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+        <div class="evidence-card" style="border-left: 3px solid #10b981; margin-bottom: 8px;">
+            <div class="evidence-title" style="color: #6ee7b7; font-size: 0.88rem; margin-bottom: 8px;">
                 PRIORITIZED DEFENSIVE MITIGATIONS
             </div>
             <div style="display: flex; flex-direction: column; gap: 6px;">
                 ${remediations.map((rem, idx) => `
-                    <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 0.78rem; color: var(--t-secondary);">
-                        <span class="mono" style="color: #34d399; font-weight: 700;">[0${idx+1}]</span>
+                    <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 0.76rem; color: var(--t-secondary); line-height: 1.45; overflow-wrap: anywhere; word-break: break-word;">
+                        <span class="mono" style="color: #34d399; font-weight: 700; flex-shrink: 0;">[0${idx+1}]</span>
                         <span>${escapeHtml(rem)}</span>
                     </div>
                 `).join("")}
             </div>
         </div>
-
-        <!-- 5. Interactive Investigator Copilot Drawer -->
-        <div class="evidence-card" style="border-left: 3px solid #6366f1; margin-bottom: 8px; background: var(--c-surface);">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                <div class="evidence-title" style="color: #a5b4fc; font-size: 0.92rem; display: flex; align-items: center; gap: 6px;">
-                    INTERACTIVE INVESTIGATOR COPILOT
-                </div>
-                <span class="badge-pill mono" style="font-size: 0.68rem; background: rgba(99, 102, 241, 0.2); color: #c7d2fe;">TARGET CONTEXT LOADED</span>
-            </div>
-
-            <!-- Quick Prompt Shortcut Chips -->
-            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;">
-                <button type="button" class="btn-tool" onclick="sendCopilotPrompt('What is this target\\'s highest single attack vector?')" style="font-size: 0.7rem; padding: 3px 8px; color: #a5b4fc; border-color: rgba(99, 102, 241, 0.4);">
-                    Highest Attack Vector?
-                </button>
-                <button type="button" class="btn-tool" onclick="sendCopilotPrompt('How can this target remove their records from 1881.no and public directories?')" style="font-size: 0.7rem; padding: 3px 8px; color: #a5b4fc; border-color: rgba(99, 102, 241, 0.4);">
-                    1881.no De-listing Guidance
-                </button>
-                <button type="button" class="btn-tool" onclick="sendCopilotPrompt('Draft an immediate 3-step security advisory for this user.')" style="font-size: 0.7rem; padding: 3px 8px; color: #a5b4fc; border-color: rgba(99, 102, 241, 0.4);">
-                    Draft User Advisory
-                </button>
-                <button type="button" class="btn-tool" onclick="sendCopilotPrompt('Explain whether the candidate accounts on gaming/social sites are genuine or false positives.')" style="font-size: 0.7rem; padding: 3px 8px; color: #a5b4fc; border-color: rgba(99, 102, 241, 0.4);">
-                    Verify Candidate Accounts
-                </button>
-            </div>
-
-            <!-- Copilot Chat Stream Window -->
-            <div id="copilot-chat-window" style="max-height: 280px; overflow-y: auto; background: var(--c-elevated); border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px;">
-                <div style="font-size: 0.75rem; color: #94a3b8; font-style: italic;">
-                    Copilot is ready. Ask any investigative question regarding ${escapeHtml(currentEmail)}'s compromise posture, credential patterns, or defensive mitigations.
-                </div>
-            </div>
-
-            <!-- Input Box -->
-            <div style="display: flex; gap: 8px;">
-                <input 
-                    type="text" 
-                    id="copilot-input" 
-                    class="modal-input mono" 
-                    style="flex: 1; font-size: 0.78rem;" 
-                    placeholder="Ask Copilot a question about this target..."
-                    onkeydown="if(event.key === 'Enter'){ event.preventDefault(); submitCopilotChat(); }"
-                >
-                <button type="button" id="btn-copilot-submit" class="btn-primary" onclick="submitCopilotChat()" style="padding: 0 16px; font-size: 0.78rem;">
-                    Ask Copilot &rarr;
-                </button>
-            </div>
-        </div>
     `;
 }
 
-function sendCopilotPrompt(promptText) {
-    const input = document.getElementById("copilot-input");
-    if (input) {
-        input.value = promptText;
-        submitCopilotChat();
+/* ==========================================================================
+   Interactive Investigator Copilot Chat
+   ========================================================================== */
+
+async function sendCopilotMessage(userText) {
+    const text = (userText || "").trim();
+    if (!text) return;
+
+    const chatContainer = document.getElementById("copilot-chat-messages");
+    const inputEl = document.getElementById("copilot-chat-input");
+    const sendBtn = document.getElementById("btn-copilot-send");
+
+    if (inputEl) inputEl.value = "";
+
+    // Append User Message bubble
+    if (chatContainer) {
+        const userBubble = document.createElement("div");
+        userBubble.className = "chat-bubble chat-user";
+        userBubble.innerHTML = `
+            <div class="chat-bubble-author">INVESTIGATOR</div>
+            <div class="chat-bubble-body">${escapeHtml(text)}</div>
+        `;
+        chatContainer.appendChild(userBubble);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
     }
-}
 
-async function submitCopilotChat() {
-    const input = document.getElementById("copilot-input");
-    const chatWin = document.getElementById("copilot-chat-window");
-    const submitBtn = document.getElementById("btn-copilot-submit");
-    if (!input || !chatWin) return;
+    copilotChatHistory.push({ role: "user", content: text });
+    playSound("click");
 
-    const query = input.value.trim();
-    if (!query) return;
+    // Loading indicator bubble
+    let loadingBubble = null;
+    if (chatContainer) {
+        loadingBubble = document.createElement("div");
+        loadingBubble.className = "chat-bubble chat-ai";
+        loadingBubble.innerHTML = `
+            <div class="chat-bubble-author">AI AGENT</div>
+            <div class="chat-bubble-body" style="display: flex; align-items: center; gap: 8px;">
+                <span class="status-btn-icon" style="background: #a855f7; box-shadow: 0 0 6px #a855f7;"></span>
+                <span>Thinking & synthesizing exposure response...</span>
+            </div>
+        `;
+        chatContainer.appendChild(loadingBubble);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
 
-    // Append user message
-    const userMsgEl = document.createElement("div");
-    userMsgEl.style.cssText = "align-self: flex-end; background: rgba(99, 102, 241, 0.2); border: 1px solid rgba(99, 102, 241, 0.4); color: #e0e7ff; padding: 6px 10px; border-radius: 6px; font-size: 0.78rem; max-width: 80%;";
-    userMsgEl.innerText = query;
-    chatWin.appendChild(userMsgEl);
-
-    input.value = "";
-    if (submitBtn) submitBtn.disabled = true;
-
-    // Append thinking message
-    const botMsgEl = document.createElement("div");
-    botMsgEl.style.cssText = "align-self: flex-start; background: var(--c-surface); border: 1px solid var(--b-hairline); color: var(--t-primary); padding: 6px 10px; border-radius: 6px; font-size: 0.78rem; max-width: 90%; white-space: pre-line;";
-    botMsgEl.innerHTML = `<span style="color: #c084fc;">Copilot is analyzing forensic evidence...</span>`;
-    chatWin.appendChild(botMsgEl);
-    chatWin.scrollTop = chatWin.scrollHeight;
+    if (sendBtn) sendBtn.disabled = true;
 
     try {
+        const targetEmail = currentEmail || (currentInvestigationData && currentInvestigationData.employee ? currentInvestigationData.employee.corporate_email : "");
         const resp = await fetch("/api/ai/copilot", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                email: currentEmail,
-                message: query,
+                message: text,
+                email: targetEmail,
+                scan_data: currentInvestigationData,
+                history: copilotChatHistory.slice(-6),
                 api_key: getAIKey(),
-                provider: getAIProvider(),
-                scan_data: currentInvestigationData
+                provider: getAIProvider()
             })
         });
-        const res = await resp.json();
-        botMsgEl.innerHTML = res.reply ? res.reply.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') : 'No response from Copilot.';
-    } catch (e) {
-        botMsgEl.innerHTML = `<span style="color: #f87171;">[ERROR] Network error: ${escapeHtml(e.message)}</span>`;
+
+        const resData = await resp.json();
+        const rawReply = resData.reply || resData.response || resData.answer || resData.message || (typeof resData === "string" ? resData : "Threat copilot evaluation complete.");
+        
+        copilotChatHistory.push({ role: "assistant", content: rawReply });
+
+        if (loadingBubble) {
+            // Format bold markdown
+            const formatted = escapeHtml(rawReply)
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>');
+            loadingBubble.innerHTML = `
+                <div class="chat-bubble-author">AI AGENT</div>
+                <div class="chat-bubble-body" style="white-space: pre-wrap; line-height: 1.55;">${formatted}</div>
+            `;
+        }
+        playSound("click");
+    } catch (err) {
+        if (loadingBubble) {
+            loadingBubble.innerHTML = `
+                <div class="chat-bubble-author" style="color: #f87171;">AI AGENT [ERROR]</div>
+                <div class="chat-bubble-body" style="color: #fca5a5;">${escapeHtml(err.message || "Failed to reach AI copilot.")}</div>
+            `;
+        }
     } finally {
-        if (submitBtn) submitBtn.disabled = false;
-        chatWin.scrollTop = chatWin.scrollHeight;
+        if (sendBtn) sendBtn.disabled = false;
+        if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 }
+window.sendCopilotMessage = sendCopilotMessage;
+
+window.handleCopilotSubmit = function(e) {
+    if (e) e.preventDefault();
+    const input = document.getElementById("copilot-chat-input");
+    if (input && input.value) {
+        sendCopilotMessage(input.value);
+    }
+};
+
+window.askCopilotPrompt = function(promptText) {
+    switchCopilotTab('chat');
+    sendCopilotMessage(promptText);
+};
+
+// Backward-compatibility aliases
+window.submitCopilotChat = function() {
+    const input = document.getElementById("copilot-chat-input") || document.getElementById("copilot-input");
+    if (input && input.value) {
+        sendCopilotMessage(input.value);
+    }
+};
+
+window.sendCopilotPrompt = function(promptText) {
+    askCopilotPrompt(promptText);
+};
 
 /**
  * Multi-Country Telecom & Civil Directory Router UI Component
@@ -6760,3 +7518,23 @@ window.clearTabComparator = clearTabComparator;
 window.refreshTargetImages = refreshTargetImages;
 
 
+
+
+window.filterPivotCategory = function(selectedCat) {
+    document.querySelectorAll(".btn-pivot-filter").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-pivot-filter") === selectedCat);
+    });
+    document.querySelectorAll("#pivot-cards-list .pivot-entry-card").forEach(el => {
+        const itemCat = el.getAttribute("data-pivot-cat");
+        const matches = (selectedCat === "all") || 
+                        (itemCat === selectedCat) || 
+                        (selectedCat === "accounts" && (itemCat === "social" || itemCat === "gaming")) ||
+                        ((selectedCat === "social" || selectedCat === "gaming") && itemCat === "accounts");
+        if (matches) {
+            el.style.display = "block";
+        } else {
+            el.style.display = "none";
+        }
+    });
+    if (window.SoundManager) window.SoundManager.play("click");
+};

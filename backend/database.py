@@ -19,6 +19,7 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(str(path), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA busy_timeout = 30000;")
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
@@ -166,18 +167,34 @@ COMMON_FIRST_NAMES = {
 def parse_name_from_email(email: str) -> str:
     cleaned = email.strip().lower()
     local = cleaned.split("@")[0]
+    
+    # 1. Delimiter-separated names (e.g. john.smith, alex_morgan)
+    parts = re.split(r'[._\-\+]+', local)
+    clean_parts = [re.sub(r'\d+', '', p).capitalize() for p in parts if len(re.sub(r'\d+', '', p)) >= 2]
+    if len(clean_parts) >= 2:
+        return " ".join(clean_parts)
+
+    # 2. High-speed AI / Onomastic Identity Decomposer
+    try:
+        from backend.identity_decomposer import decompose_target_identity
+        decomposed = decompose_target_identity(email)
+        if decomposed and decomposed.get("full_name") and len(decomposed["full_name"]) >= 3:
+            return decomposed["full_name"]
+    except Exception:
+        pass
+
+    # 3. Known first names dictionary fallback
     parts = re.split(r'[._\-\+\d]+', local)
     parts = [p.capitalize() for p in parts if len(p) >= 2]
     if len(parts) >= 2:
         return " ".join(parts)
     elif len(parts) == 1:
         single = parts[0].lower()
-        # Test if single word starts with a known first name (e.g. jordinzwaan -> Jordin Zwaan, yasirkadhim -> Yasir Kadhim)
+        # Test if single word starts with a known first name
         for fn in sorted(COMMON_FIRST_NAMES, key=lambda x: -len(x)):
             if single.startswith(fn) and len(single) > len(fn) + 1:
                 sur = single[len(fn):]
                 if not sur.isdigit() and len(sur) >= 2:
-                    # Ignore short diminutive endings like 'os' in 'filipos'
                     if sur in ["os", "ek", "ik", "ka", "io", "ie", "y"]:
                         return fn.capitalize()
                     return f"{fn.capitalize()} {sur.capitalize()}"
@@ -204,7 +221,8 @@ def get_or_create_identity_profile(
     custom_city: Optional[str] = None,
     custom_street: Optional[str] = None,
     custom_relative: Optional[str] = None,
-    anchors: Optional[Dict[str, str]] = None
+    anchors: Optional[Dict[str, str]] = None,
+    refresh: bool = False
 ) -> Dict[str, Any]:
     """
     Retrieves an existing identity profile or creates a new one.
@@ -298,8 +316,18 @@ def get_or_create_identity_profile(
             )
             return get_employee_by_id(emp_id)
 
-        # For any non-demo email, refresh live OSINT intelligence on search
-        if cleaned_email not in DEMO_EMAILS and scenario != "clean":
+        # For non-demo emails: return cached profile instantly unless refresh is requested or profile has no records
+        conn_check = get_connection()
+        cur_c = conn_check.cursor()
+        existing_records_count = cur_c.execute(
+            "SELECT (SELECT COUNT(*) FROM credentials WHERE employee_id = ?) + (SELECT COUNT(*) FROM pivots WHERE employee_id = ?)",
+            (emp_id, emp_id)
+        ).fetchone()[0]
+        conn_check.close()
+
+        should_scan = refresh or (cleaned_email not in DEMO_EMAILS and scenario != "clean" and existing_records_count == 0)
+
+        if should_scan:
             from backend.osint_scanner import scan_email_breaches, ingest_breaches_to_profile
             breaches = scan_email_breaches(cleaned_email)
             conn_b = get_connection()

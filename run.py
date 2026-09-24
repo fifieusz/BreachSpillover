@@ -50,6 +50,28 @@ def main():
 
     port = 8000
     host = "127.0.0.1"
+
+    # Automatically free port if already occupied by a previous server instance
+    try:
+        import subprocess
+        out = subprocess.check_output(f"netstat -ano | findstr :{port}", shell=True, text=True, stderr=subprocess.DEVNULL)
+        cur_pid = os.getpid()
+        killed = set()
+        for line in out.strip().splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 5 and f":{port}" in parts[1]:
+                try:
+                    p = int(parts[-1])
+                    if p != cur_pid and p > 0 and p not in killed:
+                        subprocess.run(f"taskkill /F /PID {p}", shell=True, capture_output=True)
+                        killed.add(p)
+                except Exception:
+                    pass
+        if killed:
+            print(f"[+] Cleaned port {port} (terminated previous process PID: {', '.join(map(str, killed))})")
+    except Exception:
+        pass
+
     url = f"http://{host}:{port}"
     print(f"[*] Starting BreachSpillover Server at: {url}")
     print("[*] Press Ctrl+C to terminate.")

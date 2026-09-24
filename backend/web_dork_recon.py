@@ -489,20 +489,31 @@ def inspect_personal_site_metadata(url: str) -> Optional[Dict[str, Any]]:
             prompt = f"Extract the following entities from this personal website text. Return JSON with keys: city (str), country (str), bio (str), job_title (str), workplace (str), phone (str). If an entity is not found, set its value to null.\n\nWebsite Text: {clean_text[:5000]}"
             system_instruction = "You are an expert OSINT data extraction tool. You extract biographical data from unstructured text. Return ONLY a valid JSON object matching the exact keys requested."
             try:
-                res = call_groq_api(prompt, system_instruction, api_key, response_json=True)
-                if res and isinstance(res, dict):
-                    intel["city"] = res.get("city")
-                    intel["country"] = res.get("country")
-                    intel["bio"] = res.get("bio")
-                    intel["job_title"] = res.get("job_title")
-                    intel["workplace"] = res.get("workplace")
-                    
-                    if res.get("phone"):
-                        if "phone_numbers" not in intel:
-                            intel["phone_numbers"] = []
-                        intel["phone_numbers"].append(res.get("phone"))
+                res = call_groq_api(prompt, system_instruction, api_key, response_json=True, max_tokens=300)
+                if res and res.get("success") and res.get("text"):
+                    raw_text = res["text"].strip()
+                    if "```" in raw_text:
+                        m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', raw_text)
+                        if m:
+                            raw_text = m.group(1).strip()
+                    parsed = json.loads(raw_text)
+                    if isinstance(parsed, dict):
+                        intel["city"] = parsed.get("city")
+                        intel["country"] = parsed.get("country")
+                        intel["bio"] = parsed.get("bio")
+                        intel["job_title"] = parsed.get("job_title")
+                        intel["workplace"] = parsed.get("workplace")
+                        
+                        if parsed.get("phone"):
+                            if "phone_numbers" not in intel:
+                                intel["phone_numbers"] = []
+                            intel["phone_numbers"].append(parsed.get("phone"))
             except Exception as e:
                 print(f"[!] LLM Deep Scrape failed: {e}")
+
+        # Fallback bio snippet from clean page text if LLM extraction returned null
+        if not intel.get("bio") and clean_text:
+            intel["bio"] = clean_text[:300]
 
         # Secondary email check
         mail_m = re.findall(r'mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})', html, re.IGNORECASE)
@@ -611,7 +622,7 @@ Respond ONLY with valid JSON in this exact structure:
 If no verified target data is corroborated, return {{"is_corroborated": false, "confidence_score": 0.0, "full_name_candidate": null, "location": null, "workplace": null, "phone_numbers": [], "profiles": []}}."""
 
     try:
-        res = call_groq_api(prompt, system_instruction, api_key, temperature=0.1, response_json=True)
+        res = call_groq_api(prompt, system_instruction, api_key, temperature=0.1, response_json=True, max_tokens=400)
         if res.get("success") and res.get("text"):
             raw_text = res["text"].strip()
             if "```" in raw_text:
@@ -866,6 +877,13 @@ def execute_ai_dork_recon(
     clean_name_handle = target_name.lower().replace(" ", "").replace(".", "").replace("-", "")
     if clean_name_handle and clean_name_handle not in candidate_handles:
         candidate_handles.append(clean_name_handle)
+
+    from backend.live_osint import derive_candidate_handles
+    name_derived = derive_candidate_handles(target_email, target_name=target_name)
+    for nh in name_derived:
+        if nh not in candidate_handles:
+            candidate_handles.append(nh)
+
     for h in handles:
         if h not in candidate_handles:
             candidate_handles.append(h)
@@ -882,6 +900,7 @@ def execute_ai_dork_recon(
         "https://about.me/{h}",
     ]
 
+    discovered_personal_sites: List[Dict[str, Any]] = []
     for h in candidate_handles[:4]:
         for tmpl in probe_templates:
             candidate_url = tmpl.format(h=h)
@@ -896,29 +915,45 @@ def execute_ai_dork_recon(
                         if site_meta:
                             if not site_metadata:
                                 site_metadata = site_meta
+                            discovered_personal_sites.append({
+                                "platform": "Portfolio",
+                                "url": candidate_url,
+                                "handle": h,
+                                "context": f"Verified Personal Web Portfolio ({h}) located via OSINT dork"
+                            })
                             if candidate_url not in seen_urls:
                                 seen_urls.add(candidate_url)
                                 all_snippets.append({
                                     "title": f"Verified Personal Web Portfolio ({h})",
                                     "url": candidate_url,
                                     "snippet": site_meta.get("bio") or f"Personal web presence deployed at {candidate_url}"
-                                })
+                                    })
             except Exception:
                 pass
 
     # Execute targeted live dorks dynamically
-    queries = [
-        f"{target_name}",
-        f'"{target_name}"',
-        f"{target_name} facebook",
-        f"{target_name} linkedin",
-        f"{target_name} portfolio OR website",
-        f"{target_name} company OR workplace OR employer",
-        f'"{target_name}" kvk OR vennoot OR partner OR director',
-    ]
+    queries = []
+    if target_email and "@" in target_email:
+        queries.append(f'"{target_email}"')
+
+    has_real_target_name = bool(target_name and target_name.lower() not in ["target user", "webmail target", "target"])
+    if has_real_target_name:
+        queries.extend([
+            f"{target_name}",
+            f'"{target_name}"',
+            f"{target_name} twitter OR \"x.com\"",
+            f"{target_name} facebook",
+            f"{target_name} linkedin",
+            f"{target_name} github",
+            f"{target_name} instagram",
+            f"{target_name} portfolio OR website",
+            f"{target_name} company OR workplace OR employer",
+            f'"{target_name}" kvk OR vennoot OR partner OR director',
+        ])
     if local_part and len(local_part) >= 4 and local_part != target_name.lower().replace(" ", ""):
-        queries.append(f"{local_part}")
-        queries.append(f"{local_part} facebook")
+        if has_real_target_name:
+            queries.append(f'"{target_name}" "{local_part}"')
+        queries.append(f'"{local_part}"')
 
     for q in queries:
         snips = query_search_snippets(q, max_results=8)
@@ -1018,7 +1053,13 @@ def execute_ai_dork_recon(
             if v_fb and not any("facebook" in p.get("url", "") for p in final_result.get("profiles", [])):
                 final_result.setdefault("profiles", []).append(v_fb)
 
-    # Check search snippets for strictly verified Facebook profiles
+    # Ingest verified personal sites discovered via direct candidate probing
+    if final_result and discovered_personal_sites:
+        for ps in discovered_personal_sites:
+            if not any(p.get("url") == ps["url"] for p in final_result.get("profiles", [])):
+                final_result.setdefault("profiles", []).append(ps)
+
+    # Check search snippets for strictly verified Facebook and Twitter/X profiles
     if final_result:
         for s in all_snippets:
             u = s.get("url", "")
@@ -1033,6 +1074,22 @@ def execute_ai_dork_recon(
                 )
                 if v_fb and not any(p.get("url") == v_fb["url"] for p in final_result.get("profiles", [])):
                     final_result.setdefault("profiles", []).append(v_fb)
+            elif "twitter.com/" in u.lower() or "x.com/" in u.lower():
+                tw_match = re.search(r'(?:twitter\.com|x\.com)/([a-zA-Z0-9_]{1,25})', u, re.IGNORECASE)
+                if tw_match:
+                    tw_handle = tw_match.group(1).lower()
+                    if tw_handle not in ["home", "explore", "search", "intent", "share", "i", "settings", "login"]:
+                        s_text = f"{s.get('title', '')} {s.get('snippet', '')}".lower()
+                        t_parts = [p.lower() for p in target_name.split() if len(p) >= 3]
+                        has_name_match = (len(t_parts) >= 2 and all(tp in s_text or tp in tw_handle for tp in t_parts)) or (len(t_parts) >= 1 and any(tp in tw_handle for tp in t_parts))
+                        has_handle_match = any(h.lower() == tw_handle or (len(h) >= 4 and h.lower() in tw_handle) for h in handles)
+                        if (has_name_match or has_handle_match) and not any(p.get("platform") == "Twitter / X" for p in final_result.get("profiles", [])):
+                            final_result.setdefault("profiles", []).append({
+                                "platform": "Twitter / X",
+                                "url": f"https://x.com/{tw_handle}",
+                                "handle": tw_handle,
+                                "context": f"Public profile on X (Twitter) corroborated via OSINT search dork (@{tw_handle})"
+                            })
 
     # Final sanitization: ensure no corrupted or non-matching Facebook URLs exist in profiles
     if final_result and "profiles" in final_result:

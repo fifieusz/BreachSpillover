@@ -675,15 +675,15 @@ def build_identity_graph(
 
             p_val_low = p_val.lower()
             if "steam" in p_val_low:
-                cat_tag = "GAMING: STEAM"
+                cat_tag = "PROFILE: STEAM"
                 acc_border = "#0284c7"
                 acc_bg = "#071724"
             elif "roblox" in p_val_low:
-                cat_tag = "GAMING: ROBLOX"
+                cat_tag = "PROFILE: ROBLOX"
                 acc_border = "#e11d48"
                 acc_bg = "#240a10"
             elif "chess" in p_val_low:
-                cat_tag = "GAMING: CHESS.COM"
+                cat_tag = "PROFILE: CHESS.COM"
                 acc_border = "#65a30d"
                 acc_bg = "#111f07"
             elif "spotify" in p_val_low:
@@ -723,7 +723,7 @@ def build_identity_graph(
                 acc_border = "#c084fc"
                 acc_bg = "#220930"
             elif "gamertag" in p_val_low or "brawlhalla" in p_val_low or "esports" in p_val_low:
-                cat_tag = "ESPORTS: GAMERTAG"
+                cat_tag = "PROFILE: ESPORTS"
                 acc_border = "#f59e0b"
                 acc_bg = "#261a06"
             else:
@@ -829,7 +829,16 @@ def build_identity_graph(
             })
 
         # Render candidate/suspected accounts connected to Accounts Hub with distinct quarantined styling
-        for sp in suspected_pivots[:6]:
+        # Deduplicate by platform so we never render duplicate candidate nodes for the same platform (e.g. Roblox)
+        seen_suspected_plats = set()
+        deduped_suspected = []
+        for sp in suspected_pivots:
+            sp_plat = sp.get("pivot_value", "").split(":")[0].strip().lower()
+            if sp_plat not in seen_suspected_plats:
+                seen_suspected_plats.add(sp_plat)
+                deduped_suspected.append(sp)
+
+        for sp in deduped_suspected[:6]:
             sp_node_id = f"suspected_{sp['id']}"
             sp_val = sp["pivot_value"]
             sp_note = str(sp.get("context_note", ""))

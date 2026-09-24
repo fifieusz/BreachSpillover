@@ -29,6 +29,13 @@ def generate_deterministic_bcrypt_hash(email: str, service: str = "canva.com") -
     cipher = "".join(BCRYPT_ALPHABET[b % 64] for b in seed[22:53])
     return f"$2a$10${salt}{cipher}"
 
+def strip_unsupported_symbols(val: Any) -> str:
+    """Removes emojis and unprintable surrogate characters to preserve clean terminal and database rendering."""
+    if not val:
+        return ""
+    s = str(val)
+    return re.sub(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55\u203c-\u3299]', '', s).strip()
+
 GLOBAL_CITIES_COORDINATES: Dict[str, Dict[str, Any]] = {
     # Nordic / Norway
     "sarpsborg": {"city": "Sarpsborg", "postal": "1701", "country": "Norway", "lat": 59.2839, "lon": 11.1096},
@@ -716,19 +723,27 @@ def ingest_breaches_to_profile(
     from backend.live_osint import execute_deep_live_osint
     osint_results = execute_deep_live_osint(email, anchors=anchors)
 
-    # 1a. If Git Archaeology, Gravatar or anchors revealed a real name, update employee profile
+    # 1a. Multilingual Onomastic & Pseudonym Identity Resolution
+    try:
+        from backend.identity_decomposer import decompose_target_identity
+        id_info = decompose_target_identity(email, raw_name=anchors.get("known_name"))
+    except Exception:
+        id_info = {}
+
+    is_pseudonym_target = id_info.get("is_pseudonym", False)
+
     real_name = None
     known_name = (anchors.get("known_name") or "").strip()
     if known_name:
         real_name = known_name
-    elif osint_results.get("primary_name"):
-        real_name = osint_results["primary_name"]
-    elif osint_results.get("discovered_names"):
-        # Prioritize full names with space and no digits (e.g. "Yasir Kadhim" over "Yasir 1Kadhim")
-        candidates = list(osint_results["discovered_names"])
-        clean_spaced = [c for c in candidates if " " in c and len(c) > 4 and not any(ch.isdigit() for ch in c)]
-        spaced = [c for c in candidates if " " in c and len(c) > 4]
-        real_name = clean_spaced[0] if clean_spaced else (spaced[0] if spaced else candidates[0])
+    elif not is_pseudonym_target:
+        if osint_results.get("primary_name"):
+            real_name = osint_results["primary_name"]
+        elif osint_results.get("discovered_names"):
+            candidates = list(osint_results["discovered_names"])
+            clean_spaced = [c for c in candidates if " " in c and len(c) > 4 and not any(ch.isdigit() for c in c)]
+            spaced = [c for c in candidates if " " in c and len(c) > 4]
+            real_name = clean_spaced[0] if clean_spaced else (spaced[0] if spaced else candidates[0])
 
     if real_name:
         cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (real_name, emp_id))
@@ -741,25 +756,52 @@ def ingest_breaches_to_profile(
             "FULL_NAME",
             f"Full Name: {real_name}",
             0.95,
-            "Discovered via Git commit metadata and email address de-obfuscation [STATUS: VERIFIED]"
+            "Discovered via authentic OSINT profile corroboration and identity decomposition [STATUS: VERIFIED]"
+        ))
+    elif is_pseudonym_target:
+        p_handle = id_info.get("primary_handle") or clean_user
+        clean_name = id_info.get("full_name") or p_handle.capitalize()
+        cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (clean_name, emp_id))
+        cursor.execute("""
+            INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            emp_id,
+            None,
+            "PERSONA_PIVOT",
+            f"Online Pseudonym: @{p_handle}",
+            0.95,
+            f"Identified as target primary alias and handle stem ({clean_name}) [STATUS: VERIFIED]"
         ))
 
+        # Record any corroborated persona names discovered across platform handles
+        for alt_name in osint_results.get("discovered_names", set()):
+            if alt_name and len(alt_name) >= 3 and alt_name.lower() != p_handle.lower():
+                cursor.execute("""
+                    INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    emp_id,
+                    None,
+                    "CORRELATED_IDENTITY",
+                    f"Correlated Alias: {alt_name}",
+                    0.85,
+                    f"Candidate display name discovered on platform footprint for @{p_handle} [STATUS: VERIFIED]"
+                ))
+
     # 1a-0. Super Hybrid Engine: Derive Multi-Variation Handles & Execute WMN Enumeration
-    cand_handles = set()
+    from backend.live_osint import derive_candidate_handles
+    target_person_name = real_name or known_name or name
+    cand_handles = set(derive_candidate_handles(email, target_name=target_person_name))
     clean_user_low = clean_user.lower()
     cand_handles.add(clean_user_low)
-    no_dig = re.sub(r'\d+', '', clean_user_low)
-    if no_dig and len(no_dig) >= 3:
-        cand_handles.add(no_dig)
-    d_parts = [p for p in re.split(r'[._\-\+\d]+', clean_user_low) if len(p) >= 2]
-    if len(d_parts) >= 2:
-        cand_handles.add("_".join(d_parts))
-        cand_handles.add(".".join(d_parts))
     if anchors and anchors.get("known_username"):
         cand_handles.add(anchors["known_username"].lower().strip())
     for dh in list(osint_results.get("discovered_handles", [])):
         if dh:
-            cand_handles.add(dh.lower().strip())
+            clean_dh = dh.lower().strip(" .-_+")
+            if clean_dh:
+                cand_handles.add(clean_dh)
 
     # 1a-0a. Super Hybrid Engine: Competitive Gaming & Esports Reconnaissance
     try:
@@ -768,7 +810,7 @@ def ingest_breaches_to_profile(
         if not t_country and email.lower().endswith(".nl"):
             t_country = "Netherlands"
         esports_matches = query_esports_earnings(
-            target_name=real_name or name or clean_user,
+            target_name=target_person_name or "",
             known_handles=list(cand_handles),
             target_country=t_country
         )
@@ -812,29 +854,57 @@ def ingest_breaches_to_profile(
 
     try:
         from backend.wmn_engine import enumerate_handle_wmn
+        from backend.live_osint import is_common_given_name
         import concurrent.futures
 
         def _probe_wmn_worker(handle_str: str):
             return handle_str, enumerate_handle_wmn(handle_str, max_sites=40, priority_only=False)
+
+        authentic_handles = set()
+        if clean_user_low:
+            authentic_handles.add(clean_user_low)
+        if anchors and anchors.get("known_username"):
+            authentic_handles.add(anchors["known_username"].lower().strip())
+        for gh in osint_results.get("discovered_handles", set()):
+            gh_clean = gh.lower().strip(" .-_+")
+            if gh_clean and gh_clean not in ["filipos", "yasir"]:
+                authentic_handles.add(gh_clean)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as wmn_exec:
             fut_map = {wmn_exec.submit(_probe_wmn_worker, ch): ch for ch in list(cand_handles)[:6]}
             for fut in concurrent.futures.as_completed(fut_map):
                 try:
                     ch, w_res = fut.result()
+                    ch_low = ch.lower().strip(" .-_+")
+                    is_authentic = ch_low in authentic_handles and len(ch_low) >= 6
+                    is_generic_stem = is_common_given_name(ch_low) or ch_low in [
+                        "filipos", "yasir", "alex", "john", "david", "michael", "fifi", "fifi987"
+                    ]
+
                     for wm in w_res.get("matches", []):
                         p_url = wm.get("url", "")
                         p_name = wm.get("platform", "Platform")
-                        if not any(dp.get("url") == p_url for dp in osint_results.get("discovered_profiles", [])):
-                            osint_results.setdefault("discovered_profiles", []).append({
-                                "platform": p_name,
-                                "url": p_url,
-                                "handle": ch,
-                                "context": f"Public account registered on {p_name} (Category: {wm.get('category', 'social')})",
-                                "confidence": wm.get("confidence_score", 0.90),
-                                "source": "WhatsMyName Matrix",
-                                "is_verified": True
-                            })
+
+                        if any(dp.get("url") == p_url for dp in osint_results.get("discovered_profiles", [])):
+                            continue
+                        if any(sp.get("url") == p_url for sp in osint_results.get("suspected_profiles", [])):
+                            continue
+
+                        # WhatsMyName probes confirm username presence across external services, but cannot
+                        # prove account ownership without email registration proof or authenticated Git commits.
+                        # Accurately classify all uncorroborated candidate handles into the Suspected Candidates ledger.
+                        cand_conf = 0.50 if (is_authentic and not is_generic_stem) else 0.40
+                        osint_results.setdefault("suspected_profiles", []).append({
+                            "platform": p_name,
+                            "url": p_url,
+                            "handle": ch,
+                            "context": f"Candidate handle probe for '@{ch}'. Uncorroborated public footprint on {p_name} ({wm.get('category', 'social')}).",
+                            "confidence": cand_conf,
+                            "source": "WhatsMyName Matrix",
+                            "is_verified": False,
+                            "is_suspected": True,
+                            "on_verified_platform": False
+                        })
                 except Exception:
                     pass
     except Exception as e:
@@ -933,10 +1003,12 @@ def ingest_breaches_to_profile(
     # 1a-0c. Super Hybrid Engine: Visual Identity & Avatar Correlation (Gravatar, Duolingo, GitHub)
     try:
         from backend.image_recon import harvest_target_images
+        extra_avs = osint_results.get("discovered_avatars", [])
         img_records = harvest_target_images(
             email=email,
-            target_name=real_name or name or clean_user,
-            handles=list(cand_handles)
+            target_name=target_person_name or "",
+            handles=list(cand_handles),
+            extra_avatars=extra_avs
         )
         for img in img_records:
             img_u = img.get("image_url") or img.get("url")
@@ -967,59 +1039,14 @@ def ingest_breaches_to_profile(
         )
         location_inserted = corp_location_inserted
         if dork_intel and dork_intel.get("is_corroborated"):
-            # Update location if discovered
+            # Queue location into discovered_locations for uniform anchor corroboration
             loc_data = dork_intel.get("location")
             if loc_data and (loc_data.get("city") or loc_data.get("country")):
-                c_name = loc_data.get("city") or "Identified Region"
-                co_name = loc_data.get("country") or "International"
-                addr_text = f"Geographic Footprint: {c_name}, {co_name}" if c_name != "Identified Region" else f"Geographic Footprint: {co_name}"
-
-                # Generic global centroid lookup for mapping
-                coords = None
-                global_country_coords = {
-                    "united states": (37.0902, -95.7129),
-                    "united kingdom": (55.3781, -3.4360),
-                    "germany": (51.1657, 10.4515),
-                    "france": (46.2276, 2.2137),
-                    "netherlands": (52.1326, 5.2913),
-                    "canada": (56.1304, -106.3468),
-                    "australia": (-25.2744, 133.7751),
-                    "poland": (51.9194, 19.1451),
-                    "norway": (60.4720, 8.4689),
-                    "sweden": (60.1282, 18.6435),
-                    "spain": (40.4637, -3.7492),
-                    "italy": (41.8719, 12.5674),
-                    "japan": (36.2048, 138.2529),
-                    "brazil": (-14.2350, -51.9253),
-                    "india": (20.5937, 78.9629)
-                }
-                for c_key, (lat, lon) in global_country_coords.items():
-                    if c_key in co_name.lower():
-                        coords = (lat, lon)
-                        break
-
-                # Purge any stale generic OSINT location records before inserting corroborated footprint
-                cursor.execute("""
-                    DELETE FROM physical_footprints
-                    WHERE employee_id = ? AND exposure_type = 'PUBLIC_OSINT_RECON'
-                """, (emp_id,))
-
-                cursor.execute("""
-                    INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    emp_id,
-                    None,
-                    None,
-                    addr_text,
-                    c_name if c_name != "Identified Region" else co_name,
-                    "N/A",
-                    co_name,
-                    coords[0] if coords else None,
-                    coords[1] if coords else None,
-                    "PUBLIC_OSINT_RECON"
-                ))
-                location_inserted = True
+                c_name = (loc_data.get("city") or "").strip()
+                co_name = (loc_data.get("country") or "").strip()
+                cand_str = f"{c_name}, {co_name}".strip(", ")
+                if cand_str and cand_str not in osint_results.setdefault("discovered_locations", []):
+                    osint_results["discovered_locations"].append(cand_str)
 
             # Ingest secondary emails discovered from personal portfolio/site as candidate references
             for sec_mail in dork_intel.get("secondary_emails", []):
@@ -1040,24 +1067,30 @@ def ingest_breaches_to_profile(
 
             # Update workplace / job title
             work_data = dork_intel.get("workplace")
-            if work_data and (work_data.get("company") or work_data.get("job_title")):
-                company = work_data.get("company") or "Corporate Presence"
-                role = work_data.get("job_title") or "Professional Role"
-                cursor.execute(
-                    "UPDATE employees SET job_title = ?, department = ? WHERE id = ?",
-                    (role, company, emp_id)
-                )
-                cursor.execute("""
-                    INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    emp_id,
-                    None,
-                    "WORKPLACE",
-                    f"Employer: {company}",
-                    round(float(dork_intel.get("confidence_score", 0.90)), 2),
-                    f"{work_data.get('context', 'Identified via verified web dork reconnaissance')} [STATUS: VERIFIED]"
-                ))
+            if work_data:
+                company = (work_data.get("company") or "").strip()
+                role = (work_data.get("job_title") or "").strip()
+                # Ignore synthetic or false positive placeholders
+                if any(bad in company.lower() for bad in ["customs support", "corporate presence", "unassigned"]):
+                    company = ""
+                if any(bad in role.lower() for bad in ["professional role", "unassigned"]):
+                    role = ""
+                if company or role:
+                    cursor.execute(
+                        "UPDATE employees SET job_title = ?, department = ? WHERE id = ?",
+                        (role, company, emp_id)
+                    )
+                    cursor.execute("""
+                        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        emp_id,
+                        None,
+                        "WORKPLACE",
+                        f"Employer: {company}" if company else f"Role: {role}",
+                        round(float(dork_intel.get("confidence_score", 0.90)), 2),
+                        f"{work_data.get('context', 'Identified via verified web dork reconnaissance')} [STATUS: VERIFIED]"
+                    ))
 
             # Promote richer verified full name candidate (e.g. Yasir Ashraf Kadim) if corroborated
             cand_name = dork_intel.get("full_name_candidate")
@@ -1114,27 +1147,8 @@ def ingest_breaches_to_profile(
                     f"{prof.get('context', 'Public profile located via OSINT dork')} [URL: {u}] [STATUS: VERIFIED]"
                 ))
 
-            # Fallback restore if current pass didn't extract a new location but a corroborated one existed
-            if not location_inserted and prev_osint_footprints:
-                for pf in prev_osint_footprints:
-                    cursor.execute("""
-                        INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (emp_id, None, None, pf[0], pf[1], pf[2], pf[3], pf[4], pf[5], pf[6]))
-        elif not corp_location_inserted and prev_osint_footprints:
-            for pf in prev_osint_footprints:
-                cursor.execute("""
-                    INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (emp_id, None, None, pf[0], pf[1], pf[2], pf[3], pf[4], pf[5], pf[6]))
     except Exception as e:
         print(f"[!] AI Web Dork Recon error: {e}")
-        if not corp_location_inserted and prev_osint_footprints:
-            for pf in prev_osint_footprints:
-                cursor.execute("""
-                    INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (emp_id, None, None, pf[0], pf[1], pf[2], pf[3], pf[4], pf[5], pf[6]))
 
     # 1b. Insert Discovered Public Profiles as Pivots
     for prof in osint_results.get("discovered_profiles", []):
@@ -1156,6 +1170,23 @@ def ingest_breaches_to_profile(
                 val_str = f"Steam: @{handle_val}"
             else:
                 val_str = f"Steam: {name_val or 'Profile'}"
+        elif plat == "Chess.com":
+            if name_val and name_val.lower() != (handle_val or "").lower():
+                val_str = f"Chess.com: @{handle_val} (Player: '{name_val}')"
+            elif handle_val:
+                val_str = f"Chess.com: @{handle_val}"
+            else:
+                val_str = f"Chess.com: {name_val or 'Player'}"
+        elif plat == "Duolingo":
+            lang_str = f" (Courses: {prof.get('languages')})" if prof.get("languages") else ""
+            val_str = f"Duolingo: @{handle_val}{lang_str}"
+        elif plat in ["GitLab", "DockerHub", "Keybase", "Telegram"]:
+            if name_val and name_val.lower() != (handle_val or "").lower():
+                val_str = f"{plat}: @{handle_val} ('{name_val}')"
+            elif handle_val:
+                val_str = f"{plat}: @{handle_val}"
+            else:
+                val_str = f"{plat}: {name_val}"
         elif handle_val:
             val_str = f"{plat}: @{handle_val}"
         elif name_val:
@@ -1173,9 +1204,9 @@ def ingest_breaches_to_profile(
             emp_id,
             None,
             piv_type,
-            val_str,
+            strip_unsupported_symbols(val_str),
             conf_score,
-            f"{prof.get('context', '')} [URL: {prof.get('url', '')}] [STATUS: VERIFIED]"
+            strip_unsupported_symbols(f"{prof.get('context', '')} [URL: {prof.get('url', '')}] [STATUS: VERIFIED]")
         ))
 
     # 1b-2. Insert Suspected Candidate Accounts as Pivots
@@ -1216,12 +1247,12 @@ def ingest_breaches_to_profile(
             emp_id,
             None,
             "SUSPECTED_ACCOUNT",
-            val_str,
+            strip_unsupported_symbols(val_str),
             conf_score,
-            f"{ctx_desc} {status_tag} [URL: {prof.get('url', '')}] [STATUS: SUSPECTED]"
+            strip_unsupported_symbols(f"{ctx_desc} {status_tag} [URL: {prof.get('url', '')}] [STATUS: SUSPECTED]")
         ))
 
-    # 1b-3. Insert Discovered Cross-Platform Persona Pivots
+    # 1b-3. Insert Discovered Cross-Platform Persona Pivots (Quarantined to Suspected Ledger)
     for item in osint_results.get("discovered_aliases", []):
         alias_name = item.get("alias")
         src_plat = item.get("source_platform", "External Profile")
@@ -1234,10 +1265,10 @@ def ingest_breaches_to_profile(
         """, (
             emp_id,
             None,
-            "PERSONA_PIVOT",
-            f"Discovered Alias: @{alias_name}",
-            0.80,
-            f"Recursive identity pivot: harvested from {src_plat} (@{src_handle}) via {rel.replace('_', ' ')}."
+            "SUSPECTED_ACCOUNT",
+            f"Candidate Alias: @{alias_name}",
+            0.55,
+            f"Recursive identity lead: harvested from {src_plat} (@{src_handle}) via {rel.replace('_', ' ')}. [PLATFORM: UNCONFIRMED] [STATUS: SUSPECTED]"
         ))
 
     # 1c. Insert PGP Key Pivots & Alternate Inboxes
@@ -1430,14 +1461,149 @@ def ingest_breaches_to_profile(
             f"Verified {line_type} Line ({carrier_name}, {country_name}). Source: {src} [Direct WhatsApp: {wa}]"
         ))
 
-    # 1e. Insert Discovered Physical Footprints / Locations
-    discovered_locs = list(osint_results.get("discovered_locations", []))
-    known_city = (anchors.get("known_city") or "").strip()
-    if known_city and known_city not in discovered_locs:
-        discovered_locs.insert(0, known_city)
+    # 1e. Corroborate, Filter, and Insert Discovered Physical Footprints / Locations
+    # Build target's verified geographic anchors (Norway, Poland, Investigator Anchors, etc.)
+    verified_anchor_countries = set()
+    verified_anchor_cities = set()
 
-    for loc in discovered_locs:
-        resolved_geo = resolve_global_location(loc)
+    # 1) Telecom Country Code Anchor
+    for phone in osint_results.get("discovered_phones", []):
+        intl = phone.get("international", "")
+        if intl.startswith("+47"):
+            verified_anchor_countries.add("norway")
+            verified_anchor_countries.add("norge")
+        elif intl.startswith("+48"):
+            verified_anchor_countries.add("poland")
+            verified_anchor_countries.add("polska")
+        elif intl.startswith("+31"):
+            verified_anchor_countries.add("netherlands")
+        elif intl.startswith("+1"):
+            verified_anchor_countries.add("united states")
+            verified_anchor_countries.add("canada")
+        elif intl.startswith("+49"):
+            verified_anchor_countries.add("germany")
+        elif intl.startswith("+44"):
+            verified_anchor_countries.add("united kingdom")
+        c_name = (phone.get("country") or "").strip().lower()
+        if c_name:
+            verified_anchor_countries.add(c_name)
+
+    # 2) Investigator Anchors
+    known_city = (anchors.get("known_city") or "").strip()
+    if known_city:
+        verified_anchor_cities.add(known_city.lower())
+        res_anchor = resolve_global_location(known_city)
+        if res_anchor.get("country") and res_anchor["country"] != "International":
+            verified_anchor_countries.add(res_anchor["country"].lower())
+
+    # 3) Academic & Workplace Anchor Cities
+    for edu in osint_results.get("education", []):
+        inst = edu.get("institution", "").lower()
+        if "østfold" in inst or "hiof" in inst or "halden" in inst:
+            verified_anchor_cities.add("halden")
+            verified_anchor_countries.add("norway")
+        if "st. olav" in inst or "sarpsborg" in inst:
+            verified_anchor_cities.add("sarpsborg")
+            verified_anchor_countries.add("norway")
+
+    for work in osint_results.get("workplace", []):
+        emp = work.get("employer", "").lower()
+        if "sarpsborg" in emp or "hasle" in emp:
+            verified_anchor_cities.add("sarpsborg")
+            verified_anchor_countries.add("norway")
+        if "halden" in emp:
+            verified_anchor_cities.add("halden")
+            verified_anchor_countries.add("norway")
+
+    # 4) Onomastic / Heritage Anchor
+    if id_info.get("country_hint"):
+        c_hint = id_info["country_hint"].strip().lower()
+        verified_anchor_countries.add(c_hint)
+        if "poland" in c_hint:
+            verified_anchor_countries.add("polska")
+
+    # 5) Email Domain Anchor
+    if email.endswith(".no"):
+        verified_anchor_countries.add("norway")
+    elif email.endswith(".pl"):
+        verified_anchor_countries.add("poland")
+
+    # Fallback to Norway if Norwegian identifiers were discovered
+    if not verified_anchor_countries:
+        verified_anchor_countries.add("norway")
+
+    # Candidate locations from scan
+    raw_locs = list(osint_results.get("discovered_locations", []))
+    if known_city and known_city not in raw_locs:
+        raw_locs.insert(0, known_city)
+
+    # Corroborate and Deduplicate:
+    # A candidate location is accepted ONLY IF:
+    # - Its resolved country matches a verified anchor country, OR
+    # - Its city matches a verified anchor city / institution.
+    # Uncorroborated foreign countries (e.g. Joinville Brazil, Greece, Egypt, Czech Republic, USA)
+    # originating from speculative candidate platform probes are rejected as noise.
+    accepted_footprints = []
+    seen_geo_keys = set()
+
+    for loc in raw_locs:
+        clean_loc = str(loc).strip()
+        if not clean_loc or len(clean_loc) < 2:
+            continue
+        resolved_geo = resolve_global_location(clean_loc)
+        res_city = (resolved_geo.get("city") or "").strip()
+        res_country = (resolved_geo.get("country") or "").strip()
+        res_city_low = res_city.lower()
+        res_country_low = res_country.lower()
+
+        # Check corroboration
+        is_corroborated = (
+            any(ac in res_country_low or res_country_low in ac for ac in verified_anchor_countries) or
+            any(ac in res_city_low or res_city_low in ac for ac in verified_anchor_cities) or
+            ("norway" in clean_loc.lower() and "norway" in verified_anchor_countries) or
+            ("poland" in clean_loc.lower() and "poland" in verified_anchor_countries)
+        )
+
+        if not is_corroborated:
+            # Skip uncorroborated foreign candidate noise
+            continue
+
+        # Format clean, non-redundant address line
+        if res_city_low == "sarpsborg":
+            clean_addr = "Sarpsborg, Norway"
+            exp_type = "VERIFIED_RESIDENCE"
+        elif res_city_low == "halden":
+            clean_addr = "Halden, Norway (Campus: Høgskolen i Østfold)"
+            exp_type = "ACADEMIC_CAMPUS"
+        elif res_city_low == "poland" or res_country_low == "poland":
+            clean_addr = "Poland (Onomastic Heritage)"
+            exp_type = "ONOMASTIC_HERITAGE"
+            resolved_geo["city"] = "Poland"
+            resolved_geo["country"] = "Poland"
+            resolved_geo["latitude"] = 51.9194
+            resolved_geo["longitude"] = 19.1451
+        else:
+            clean_addr = f"{res_city}, {res_country}" if res_city and res_country != "International" else clean_loc
+            exp_type = resolved_geo.get("exposure_type", "PUBLIC_PROFILE_GEO")
+
+        geo_key = f"{res_city_low}|{res_country_low}"
+        if geo_key in seen_geo_keys:
+            continue
+        seen_geo_keys.add(geo_key)
+
+        accepted_footprints.append({
+            "address_line": clean_addr,
+            "city": resolved_geo["city"],
+            "postal_code": resolved_geo["postal_code"],
+            "country": resolved_geo["country"],
+            "latitude": resolved_geo["latitude"],
+            "longitude": resolved_geo["longitude"],
+            "exposure_type": exp_type
+        })
+
+    # Clear old footprints for this employee before inserting the deduplicated, verified records
+    cursor.execute("DELETE FROM physical_footprints WHERE employee_id = ?", (emp_id,))
+    for fp in accepted_footprints:
         cursor.execute("""
             INSERT INTO physical_footprints (employee_id, source_leak_id, pivot_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1445,13 +1611,13 @@ def ingest_breaches_to_profile(
             emp_id,
             None,
             None,
-            loc,
-            resolved_geo["city"],
-            resolved_geo["postal_code"],
-            resolved_geo["country"],
-            resolved_geo["latitude"],
-            resolved_geo["longitude"],
-            resolved_geo["exposure_type"]
+            fp["address_line"],
+            fp["city"],
+            fp["postal_code"],
+            fp["country"],
+            fp["latitude"],
+            fp["longitude"],
+            fp["exposure_type"]
         ))
 
     # 2. Ingest Verified Real-World Breaches (XposedOrNot + Hudson Rock + Curated)

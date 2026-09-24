@@ -1,0 +1,997 @@
+[
+  {
+    "status": "Error",
+    "reason": "Unexpected response body",
+    "site_name": "Stackoverflow",
+    "category": "Community",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Registered",
+    "reason": "",
+    "site_name": "Quora",
+    "category": "Community",
+    "url": "https://www.quora.com",
+    "extra": {
+      "email_confirmed": true
+    },
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Disqus",
+    "category": "Community",
+    "url": "https://disqus.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Nextdoor",
+    "category": "Community",
+    "url": "https://nextdoor.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Luarocks",
+    "category": "Dev",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Medium",
+    "category": "Dev",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Atlassian",
+    "category": "Dev",
+    "url": "https://id.atlassian.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Huggingface",
+    "category": "Dev",
+    "url": "https://huggingface.co",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Registered",
+    "reason": "",
+    "site_name": "Wondershare",
+    "category": "Dev",
+    "url": "https://wondershare.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Envato",
+    "category": "Dev",
+    "url": "https://elements.envato.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Error",
+    "reason": "GitHub's signup form is behind a bot challenge, and the address is not on any public profile",
+    "site_name": "Github",
+    "category": "Dev",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Codepen",
+    "category": "Dev",
+    "url": "https://codepen.io",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Hackthebox",
+    "category": "Dev",
+    "url": "https://hackthebox.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Wordpress",
+    "category": "Dev",
+    "url": "https://wordpress.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Hackerrank",
+    "category": "Dev",
+    "url": "https://www.hackerrank.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Registered",
+    "reason": "",
+    "site_name": "Wix",
+    "category": "Dev",
+    "url": "https://wix.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Xda",
+    "category": "Dev",
+    "url": "https://xda-developers.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Codecademy",
+    "category": "Dev",
+    "url": "https://codecademy.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Howtogeek",
+    "category": "Dev",
+    "url": "https://www.howtogeek.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Devrant",
+    "category": "Dev",
+    "url": "https://devrant.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Codewars",
+    "category": "Dev",
+    "url": "https://codewars.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Hackerearth",
+    "category": "Dev",
+    "url": "https://www.hackerearth.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Rubygems",
+    "category": "Dev",
+    "url": "https://rubygems.org",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Qiita",
+    "category": "Dev",
+    "url": "https://qiita.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Hackerone",
+    "category": "Dev",
+    "url": "https://hackerone.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Hoichoi",
+    "category": "Entertainment",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Netflix",
+    "category": "Entertainment",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Weverse",
+    "category": "Entertainment",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Stremio",
+    "category": "Entertainment",
+    "url": "https://stremio.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Justwatch",
+    "category": "Entertainment",
+    "url": "https://justwatch.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Myanimelist",
+    "category": "Entertainment",
+    "url": "https://myanimelist.net",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Anilist",
+    "category": "Entertainment",
+    "url": "https://anilist.co",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Nebula.tv",
+    "category": "Entertainment",
+    "url": "https://nebula.tv",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Dreame",
+    "category": "Entertainment",
+    "url": "https://www.dreame.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Registered",
+    "reason": "",
+    "site_name": "Appletv",
+    "category": "Entertainment",
+    "url": "https://tv.apple.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Letterboxd",
+    "category": "Entertainment",
+    "url": "https://letterboxd.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Sunnxt",
+    "category": "Entertainment",
+    "url": "https://www.sunnxt.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Girlslife",
+    "category": "Entertainment",
+    "url": "https://girlslife.com/register/",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Error",
+    "reason": "Cloudflare Bot Detection (403 Forbidden), try after sometime or use proxy",
+    "site_name": "Addictinggames",
+    "category": "Gaming",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Chess.com",
+    "category": "Gaming",
+    "url": "https://chess.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Crazygames",
+    "category": "Gaming",
+    "url": "https://crazygames.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Medal",
+    "category": "Gaming",
+    "url": "https://medal.tv/login",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Stackb",
+    "category": "Gaming",
+    "url": "https://stackb.net",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Mixcloud",
+    "category": "Music",
+    "url": "https://mixcloud.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Spotify",
+    "category": "Music",
+    "url": "https://spotify.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Jiosaavn",
+    "category": "Music",
+    "url": "https://www.jiosaavn.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Gaana",
+    "category": "Music",
+    "url": "https://gaana.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Deezer",
+    "category": "Music",
+    "url": "https://www.deezer.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Ama",
+    "category": "Other",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Dragongroot",
+    "category": "Other",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Numsify",
+    "category": "Other",
+    "url": "https://numsify.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Error",
+    "reason": "Rate limited by Firefox (429)",
+    "site_name": "Firefox",
+    "category": "Other",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Anydo",
+    "category": "Other",
+    "url": "https://any.do",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Start.me",
+    "category": "Other",
+    "url": "https://start.me",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Moz",
+    "category": "Other",
+    "url": "https://moz.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Registered",
+    "reason": "",
+    "site_name": "Office365",
+    "category": "Other",
+    "url": "https://office365.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Error",
+    "reason": "Unexpected response body, report it via GitHub issues",
+    "site_name": "Dollarfix",
+    "category": "Other",
+    "url": "https://dollarfix.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Error",
+    "reason": "Failed to extract CSRF token from window variable",
+    "site_name": "Deviantart",
+    "category": "Other",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Secondline",
+    "category": "Other",
+    "url": "https://autobizline.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Screener",
+    "category": "Other",
+    "url": "https://www.screener.in",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Eventbrite",
+    "category": "Other",
+    "url": "https://eventbrite.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Registered",
+    "reason": "",
+    "site_name": "Dropbox",
+    "category": "Other",
+    "url": "https://www.dropbox.com",
+    "extra": {
+      "exists_as_recovery_email": false,
+      "has_passkey": false
+    },
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Couplejoy",
+    "category": "Social",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Slowly",
+    "category": "Social",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Superlive",
+    "category": "Social",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Gravatar",
+    "category": "Social",
+    "url": "https://gravatar.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Mewe",
+    "category": "Social",
+    "url": "https://mewe.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Plurk",
+    "category": "Social",
+    "url": "https://www.plurk.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "X (twitter)",
+    "category": "Social",
+    "url": "https://x.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Whering",
+    "category": "Social",
+    "url": "https://play.google.com/store/apps/details?id=com.whering.app",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Locket",
+    "category": "Social",
+    "url": "https://locketcamera.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Registered",
+    "reason": "",
+    "site_name": "Pinterest",
+    "category": "Social",
+    "url": "https://pinterest.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Classmates",
+    "category": "Social",
+    "url": "https://www.classmates.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Tumblr",
+    "category": "Social",
+    "url": "https://tumblr.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Lovenudge",
+    "category": "Social",
+    "url": "https://lovenudgeapp.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Instagram",
+    "category": "Social",
+    "url": "https://instagram.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Facebook",
+    "category": "Social",
+    "url": "https://facebook.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Mastodon",
+    "category": "Social",
+    "url": "https://mastodon.social",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Meeff",
+    "category": "Social",
+    "url": "https://play.google.com/store/apps/details?id=com.noyesrun.meeff.kr",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Asafeer",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Bnrlanguages",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Bunpo",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Cambly",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Hanzii",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Hellochinese",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Heyjapan",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Programminghub",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Skipped",
+    "reason": "Notifies the target by forgot password email or similar",
+    "site_name": "Talkpal",
+    "category": "Learning",
+    "url": "",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Error",
+    "reason": "Cloudflare challenge, cannot be solved without a browser",
+    "site_name": "Annaabi",
+    "category": "Learning",
+    "url": "https://annaabi.ee",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Error",
+    "reason": "Unexpected response status: 403, report it via GitHub issues",
+    "site_name": "Quizlet",
+    "category": "Learning",
+    "url": "https://quizlet.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Coursera",
+    "category": "Learning",
+    "url": "https://coursera.org",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Babbel",
+    "category": "Learning",
+    "url": "https://play.google.com/store/apps/details?id=com.babbel.mobile.android.en",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Duolingo",
+    "category": "Learning",
+    "url": "https://duolingo.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Classdojo",
+    "category": "Learning",
+    "url": "https://www.classdojo.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Aslbloom",
+    "category": "Learning",
+    "url": "https://www.aslbloom.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Allen",
+    "category": "Learning",
+    "url": "https://allen.in",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Alison",
+    "category": "Learning",
+    "url": "https://alison.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Cakeapp",
+    "category": "Learning",
+    "url": "https://play.google.com/store/apps/details?id=me.mycake",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  },
+  {
+    "status": "Not Registered",
+    "reason": "",
+    "site_name": "Vedantu",
+    "category": "Learning",
+    "url": "https://www.vedantu.com",
+    "extra": {},
+    "media": {},
+    "email": "3gbxdd@gmail.com"
+  }
+]

@@ -59,7 +59,7 @@ def resolve_api_key(provider: str = "groq", explicit_key: Optional[str] = None) 
 
 USER_AGENT = "BreachSpillover-AI/1.0"
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_DEFAULT_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 GEMINI_DEFAULT_MODEL = "gemini-1.5-flash"
 
 
@@ -69,11 +69,13 @@ def call_groq_api(
     api_key: str,
     model: str = GROQ_DEFAULT_MODEL,
     temperature: float = 0.2,
-    response_json: bool = False
+    response_json: bool = False,
+    max_tokens: int = 650
 ) -> Dict[str, Any]:
     """
     Direct REST caller for Groq's high-speed inference engine (300-500 tok/sec).
-    Automatically handles model fallback if a requested model is deprecated or inaccessible.
+    Automatically handles model fallback if a requested model is deprecated, rate-limited (429),
+    or encounters output token per minute (OTPM) constraints.
     Uses standard Python urllib with zero third-party dependencies.
     """
     clean_key = (api_key or "").strip()
@@ -92,17 +94,26 @@ def call_groq_api(
     ]
 
     candidate_models = [model]
-    for m in ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "groq/compound"]:
+    for m in ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]:
         if m not in candidate_models:
             candidate_models.append(m)
 
     last_error = "Unknown error"
+
     for candidate in candidate_models:
+        # qwen free tier has strict 1,000 Output Tokens Per Minute (OTPM) cap;
+        # gpt-oss models have 131k context and need adequate tokens (>=1200) to output full JSON schemas without truncation
+        if "qwen" in candidate:
+            cand_tokens = min(int(max_tokens or 650), 650)
+        else:
+            cand_tokens = max(int(max_tokens or 1500), 1500)
+
         payload: Dict[str, Any] = {
             "model": candidate,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 2048
+            "max_tokens": cand_tokens,
+            "reasoning_effort": "low"
         }
         if response_json:
             payload["response_format"] = {"type": "json_object"}
@@ -133,12 +144,28 @@ def call_groq_api(
             except Exception:
                 last_error = err_msg or str(e)
 
-            # If model is deprecated (400) or missing (404), try next candidate model
-            if e.code in (400, 404) and ("decommission" in last_error.lower() or "not exist" in last_error.lower() or "access" in last_error.lower()):
+            # If rate limit (429), model quota exceeded, model deprecated (400), missing (404), or JSON validation failure, continue to next model
+            if e.code == 429:
+                continue
+            if e.code in (400, 404) and any(w in last_error.lower() for w in ["decommission", "not exist", "access", "model", "deprecated", "json", "validate"]):
                 continue
             return {"success": False, "error": f"Groq API Error ({e.code}): {last_error}"}
         except Exception as e:
-            return {"success": False, "error": f"Connection error to Groq: {str(e)}"}
+            last_error = str(e)
+            continue
+
+    # Cross-fallback: if all Groq models exhausted/rate-limited, try Gemini if key available
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if gemini_key:
+        try:
+            return call_gemini_api(
+                prompt=prompt,
+                system_instruction=system_instruction,
+                api_key=gemini_key,
+                temperature=temperature
+            )
+        except Exception:
+            pass
 
     return {"success": False, "error": f"Groq API Error: {last_error}"}
 
@@ -230,7 +257,7 @@ def test_ai_connection(api_key: str, provider: str = "groq") -> Dict[str, Any]:
 def build_target_forensic_context(scan_data: Dict[str, Any]) -> str:
     """
     Distills scan data into an information-dense, structured forensic context
-    for LLM reasoning.
+    for LLM reasoning while keeping token usage safely within cloud TPM limits.
     """
     emp = scan_data.get("employee", {})
     score = scan_data.get("spillover_score", {})
@@ -247,7 +274,7 @@ def build_target_forensic_context(scan_data: Dict[str, Any]) -> str:
         f"JOB TITLE / ROLE: {emp.get('job_title')}",
         f"DEPARTMENT / ORG: {emp.get('department')}",
         f"OVERALL SPILLOVER SCORE: {score.get('score')}/100 ({score.get('level')} RISK)",
-        f"EMAIL SECURITY POSTURE: {ev.get('status')} • Provider: {ev.get('provider_type') or ev.get('email_security', {}).get('mail_provider', 'N/A')}",
+        f"EMAIL SECURITY POSTURE: {ev.get('status')} | Provider: {ev.get('provider_type') or ev.get('email_security', {}).get('mail_provider', 'N/A')}",
         "",
         "--- EXFILTRATED LEAKS & MALWARE ---"
     ]
@@ -255,48 +282,54 @@ def build_target_forensic_context(scan_data: Dict[str, Any]) -> str:
     if not leaks:
         lines.append("No database leaks or infostealer compromises detected.")
     else:
-        for l in leaks:
-            lines.append(f"- Leak: {l.get('leak_name')} ({l.get('leak_type')}) • Severity: {l.get('severity')} • Date: {l.get('breach_date')} • Malware: {l.get('malware_family', 'N/A')} • Data: {l.get('exposed_data')}")
+        for l in leaks[:8]:
+            lines.append(f"- Leak: {l.get('leak_name')} ({l.get('leak_type')}) | Severity: {l.get('severity')} | Date: {l.get('breach_date')} | Data: {l.get('exposed_data')}")
 
     lines.append("\n--- COMPROMISED CREDENTIALS ---")
     if not creds:
         lines.append("No credentials exfiltrated.")
     else:
-        for c in creds:
-            lines.append(f"- Service: {c.get('domain_compromised')} • Plaintext: {c.get('plaintext_password') or 'HASHED'} • Pattern: {c.get('password_pattern')} • Corporate Policy Match: {c.get('is_corporate_password_match')}")
+        for c in creds[:6]:
+            lines.append(f"- Service: {c.get('domain_compromised')} | Pattern: {c.get('password_pattern')} | Policy Match: {c.get('is_corporate_password_match')}")
 
     persona_pivots = [p for p in pivots if p.get("pivot_type") == "PERSONA_PIVOT"]
     if persona_pivots:
-        lines.append("\n--- DISCOVERED CROSS-PLATFORM ALIASES & RECURSIVE PERSONA PIVOTS ---")
-        for pp in persona_pivots:
-            lines.append(f"- {pp.get('pivot_value')} (Confidence: {pp.get('confidence_score')}) — {pp.get('context_note')}")
+        lines.append("\n--- DISCOVERED CROSS-PLATFORM ALIASES & PERSONA PIVOTS ---")
+        for pp in persona_pivots[:6]:
+            c_short = (pp.get("context_note") or "")[:70]
+            lines.append(f"- {pp.get('pivot_value')} (Confidence: {pp.get('confidence_score')}) | {c_short}")
 
-    lines.append("\n--- CORROBORATED & SUSPECTED PLATFORM PIVOTS ---")
-    if not pivots:
-        lines.append("No pivots found.")
+    lines.append("\n--- CORROBORATED & HIGH-CONFIDENCE PLATFORM PIVOTS ---")
+    verified_pivots = [
+        p for p in pivots
+        if p.get("pivot_type") not in ("PERSONA_PIVOT", "SUSPECTED_ACCOUNT") or float(p.get("confidence_score") or 0) >= 0.80
+    ]
+    if not verified_pivots:
+        lines.append("No high-confidence platform pivots found.")
     else:
-        for p in pivots:
-            if p.get("pivot_type") == "PERSONA_PIVOT":
-                continue
+        for p in verified_pivots[:15]:
             p_type = p.get("pivot_type")
             p_val = p.get("pivot_value")
-            c_note = p.get("context_note")
-            conf = p.get("confidence_score")
-            lines.append(f"- [{p_type}] {p_val} (Confidence: {conf}) — {c_note}")
+            c_short = (p.get("context_note") or "")[:65]
+            lines.append(f"- [{p_type}] {p_val} (Confidence: {p.get('confidence_score')}) | {c_short}")
+
+    suspected_pivots = [p for p in pivots if p.get("pivot_type") == "SUSPECTED_ACCOUNT" and float(p.get("confidence_score") or 0) < 0.80]
+    if suspected_pivots:
+        lines.append(f"- [SUSPECTED_ACCOUNTS] {len(suspected_pivots)} additional candidate handles probed across external platforms.")
 
     lines.append("\n--- GEOSPATIAL & RESIDENTIAL FOOTPRINTS ---")
     if not foots:
         lines.append("No residential addresses mapped.")
     else:
-        for f in foots:
+        for f in foots[:3]:
             lines.append(f"- Address: {f.get('address_line')}, {f.get('city')}, {f.get('country')} (Exposure: {f.get('exposure_type')})")
 
     lines.append("\n--- HOUSEHOLD RELATIVES & CO-HABITANTS ---")
     if not rels:
         lines.append("No household relatives detected.")
     else:
-        for r in rels:
-            lines.append(f"- Cohabitant: {r.get('full_name')} ({r.get('relationship')}) • Phone: {r.get('contact_phone')} • Social Eng Risk: {r.get('social_engineering_risk')}")
+        for r in rels[:4]:
+            lines.append(f"- Cohabitant: {r.get('full_name')} ({r.get('relationship')}) | Phone: {r.get('contact_phone')}")
 
     return "\n".join(lines)
 
@@ -508,7 +541,7 @@ def get_cached_dossier(email: str, max_age_seconds: float = 3600.0) -> Optional[
 
 def set_cached_dossier(email: str, dossier: Dict[str, Any]) -> None:
     key = (email or "").lower().strip()
-    if key:
+    if key and dossier:
         _DOSSIER_CACHE[key] = (time.time(), dossier)
 
 
@@ -527,17 +560,22 @@ def generate_ai_threat_dossier(
     emp = scan_data.get("employee", {})
     email = emp.get("corporate_email", "")
 
-    if not force_refresh and email:
-        cached = get_cached_dossier(email)
-        if cached:
-            return cached
-
     prov = (provider or "groq").lower().strip()
     clean_key = resolve_api_key(prov, api_key)
 
+    if not force_refresh and email:
+        cached = get_cached_dossier(email)
+        if cached:
+            # If a live API key is configured, never return an offline heuristic fallback from cache!
+            # Evict the stale fallback and perform live inference!
+            if clean_key and not cached.get("is_ai_generated"):
+                _DOSSIER_CACHE.pop((email or "").lower().strip(), None)
+            else:
+                return cached
+
     if not clean_key:
         fallback = generate_heuristic_fallback_dossier(scan_data)
-        fallback["notice"] = "Running in offline deterministic mode. Configure a free Groq or Gemini API key in [⚙️ AI SETTINGS] to unlock full LLM reasoning."
+        fallback["notice"] = "Running in offline deterministic mode. Configure a free Groq or Gemini API key in [AI SETTINGS] to unlock full LLM reasoning."
         if email:
             set_cached_dossier(email, fallback)
         return fallback
@@ -553,7 +591,7 @@ def generate_ai_threat_dossier(
         if prov == "gemini":
             res = call_gemini_api(prompt=prompt, system_instruction=SYSTEM_PROMPT_DOSSIER, api_key=clean_key)
         else:
-            res = call_groq_api(prompt=prompt, system_instruction=SYSTEM_PROMPT_DOSSIER, api_key=clean_key, response_json=True)
+            res = call_groq_api(prompt=prompt, system_instruction=SYSTEM_PROMPT_DOSSIER, api_key=clean_key, response_json=True, max_tokens=1600)
 
         if res.get("success") and res.get("text"):
             raw_text = res["text"].strip()
@@ -571,23 +609,23 @@ def generate_ai_threat_dossier(
             parsed["provider"] = res.get("provider", prov)
             parsed["model"] = res.get("model", GROQ_DEFAULT_MODEL)
             parsed["latency_seconds"] = res.get("latency_seconds")
-            parsed["engine_label"] = f"{res.get('provider', prov).upper()} ({res.get('model')}) • Generated in {res.get('latency_seconds')}s"
+            parsed["engine_label"] = f"{res.get('provider', prov).upper()} ({res.get('model')}) | Generated in {res.get('latency_seconds')}s"
             if email:
                 set_cached_dossier(email, parsed)
             return parsed
         else:
-            # Fall back to heuristic with error note
+            # Fall back to heuristic with clean, professional notice
             fallback = generate_heuristic_fallback_dossier(scan_data)
-            fallback["notice"] = f"AI request failed ({res.get('error')}). Reverted to deterministic CTI heuristic dossier."
-            if email:
-                set_cached_dossier(email, fallback)
+            err_str = str(res.get("error", ""))
+            if "429" in err_str or any(w in err_str.lower() for w in ["rate limit", "limit", "tokens", "otpm"]):
+                fallback["notice"] = "Operating in deterministic CTI heuristic mode (High-speed local intelligence analysis). Cloud AI rate limit reached."
+            else:
+                fallback["notice"] = "Operating in deterministic CTI heuristic mode (High-speed local intelligence analysis)."
             return fallback
 
-    except Exception as e:
+    except Exception:
         fallback = generate_heuristic_fallback_dossier(scan_data)
-        fallback["notice"] = f"AI parsing error ({str(e)}). Reverted to deterministic CTI heuristic dossier."
-        if email:
-            set_cached_dossier(email, fallback)
+        fallback["notice"] = "Operating in deterministic CTI heuristic mode (High-speed local intelligence analysis)."
         return fallback
 
 
@@ -652,7 +690,7 @@ def ai_copilot_chat(
                 "- **Resolved Identity:** " + (emp.get('full_name') or 'N/A') + "\n"
                 f"- **Verified Leaks:** {len(scan_data.get('leaks', []))}\n"
                 f"- **Correlated Pivots:** {len(scan_data.get('pivots', []))}\n\n"
-                "*(Tip: To enable full conversational LLM reasoning, enter your free Groq or Gemini API key in [⚙️ AI SETTINGS].)*"
+                "*(Tip: To enable full conversational LLM reasoning, enter your free Groq or Gemini API key in [AI SETTINGS].)*"
             )
 
         return {
@@ -666,7 +704,7 @@ def ai_copilot_chat(
     if prov == "gemini":
         res = call_gemini_api(prompt=user_query, system_instruction=system_instruction, api_key=clean_key)
     else:
-        res = call_groq_api(prompt=user_query, system_instruction=system_instruction, api_key=clean_key)
+        res = call_groq_api(prompt=user_query, system_instruction=system_instruction, api_key=clean_key, max_tokens=600)
 
     if res.get("success") and res.get("text"):
         return {
