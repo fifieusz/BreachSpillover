@@ -61,7 +61,7 @@ class TestTelecomRecon(unittest.TestCase):
         names = [d["name"] for d in dirs_pl]
         self.assertIn("Infonumer.pl", names)
 
-        dirs_se = get_country_directories("Jordin Zwaan", country_iso="SE")
+        dirs_se = get_country_directories("Alex Morgan", country_iso="SE")
         self.assertTrue(len(dirs_se) >= 5)
         names_se = [d["name"] for d in dirs_se]
         self.assertIn("Hitta.se", names_se)

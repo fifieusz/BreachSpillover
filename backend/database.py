@@ -137,33 +137,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-COMMON_FIRST_NAMES = {
-    # Western & Anglo-American
-    "jordin", "jordan", "filip", "phillip", "philip", "alex", "alexander", "david",
-    "john", "michael", "mike", "lucas", "luka", "thomas", "daniel", "dan", "robert",
-    "peter", "mark", "kevin", "brian", "jason", "eric", "erik", "lisa", "anna",
-    "maria", "emma", "sophia", "olivia", "james", "william", "benjamin", "samuel",
-    "nathan", "niels", "lars", "sander", "stefan", "bram", "thijs", "daan", "tim",
-    "tom", "max", "ruben", "julian", "milan", "luuk", "mees", "gijs", "teun",
-    "adam", "oliver", "henry", "george", "charles", "richard", "joseph", "sam",
-    "paul", "steven", "anthony", "andrew", "edward", "harry", "jack", "noah",
-    # Middle Eastern & Arabic & Islamic
-    "yasir", "yasser", "ashraf", "kadim", "kadhim", "ali", "omar", "mohammed", "mohamed",
-    "muhammad", "ahmed", "ahmad", "hassan", "hussein", "tariq", "tarik", "kareem",
-    "karim", "mustafa", "mahmoud", "ibrahim", "youssef", "yousef", "bilal", "hamza",
-    "khalid", "walid", "ziad", "zaid", "samir", "rami", "nabil", "fadi", "amr",
-    # Slavic & Eastern European
-    "mateusz", "piotr", "krzysztof", "pawel", "michal", "jan", "jakub", "marcin",
-    "tomasz", "andrzej", "stanislaw", "wojciech", "lukasz", "grzegorz", "dmitry",
-    "alexei", "sergey", "ivan", "vladimir", "igor", "mikhail", "nikolay", "artem",
-    # Nordic & Scandinavian
-    "ole", "per", "knut", "sven", "magnus", "henrik", "jonas", "espen", "morten",
-    "bjorn", "tor", "geir", "rune", "arild", "frode", "oyvind", "einar",
-    # Southern European & Latin
-    "carlos", "luis", "juan", "miguel", "antonio", "pedro", "manuel", "jose",
-    "marco", "matteo", "luca", "francesco", "alessandro", "giovanni", "andrea"
-}
-
 def parse_name_from_email(email: str) -> str:
     cleaned = email.strip().lower()
     local = cleaned.split("@")[0]
@@ -173,33 +146,28 @@ def parse_name_from_email(email: str) -> str:
     clean_parts = [re.sub(r'\d+', '', p).capitalize() for p in parts if len(re.sub(r'\d+', '', p)) >= 2]
     if len(clean_parts) >= 2:
         return " ".join(clean_parts)
+    elif len(clean_parts) == 1 and any(re.search(r'\d+', p) for p in parts):
+        return clean_parts[0]
 
-    # 2. High-speed AI / Onomastic Identity Decomposer
+    # 2. Multilingual AI / Onomastic Identity Decomposer (Generic for any global culture/name)
     try:
         from backend.identity_decomposer import decompose_target_identity
         decomposed = decompose_target_identity(email)
-        if decomposed and decomposed.get("full_name") and len(decomposed["full_name"]) >= 3:
-            return decomposed["full_name"]
+        if decomposed and not decomposed.get("is_pseudonym") and decomposed.get("full_name") and len(decomposed["full_name"]) >= 3:
+            cleaned_decomp = re.sub(r'\d+', '', decomposed["full_name"]).strip()
+            if len(cleaned_decomp) >= 3:
+                return cleaned_decomp
     except Exception:
         pass
 
-    # 3. Known first names dictionary fallback
+    # 3. Clean token fallback without hardcoded dictionaries
     parts = re.split(r'[._\-\+\d]+', local)
     parts = [p.capitalize() for p in parts if len(p) >= 2]
     if len(parts) >= 2:
         return " ".join(parts)
     elif len(parts) == 1:
-        single = parts[0].lower()
-        # Test if single word starts with a known first name
-        for fn in sorted(COMMON_FIRST_NAMES, key=lambda x: -len(x)):
-            if single.startswith(fn) and len(single) > len(fn) + 1:
-                sur = single[len(fn):]
-                if not sur.isdigit() and len(sur) >= 2:
-                    if sur in ["os", "ek", "ik", "ka", "io", "ie", "y"]:
-                        return fn.capitalize()
-                    return f"{fn.capitalize()} {sur.capitalize()}"
         return parts[0]
-    return local.capitalize() or "Target User"
+    return re.sub(r'\d+', '', local).capitalize() or "Target User"
 
 
 
@@ -247,12 +215,14 @@ def get_or_create_identity_profile(
     if not row:
         name = parse_name_from_email(cleaned_email)
         domain = cleaned_email.split("@")[1] if "@" in cleaned_email else "local"
-        profile_type = "Personal Account" if any(d in domain for d in ["gmail", "yahoo", "outlook", "hotmail", "proton", "icloud", "zoho", "mail"]) else "Corporate Identity"
+        is_freemail = any(d in domain for d in ["gmail", "yahoo", "outlook", "hotmail", "proton", "icloud", "zoho", "mail", "live", "aol", "yandex"])
+        org_name = domain.split(".")[0].capitalize() if not is_freemail and "." in domain else f"Domain @{domain}"
+        profile_type = "Personal Account" if is_freemail else "Corporate Identity"
         
         cursor.execute("""
             INSERT INTO employees (full_name, corporate_email, job_title, department, vip_level, avatar_seed)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (name, cleaned_email, profile_type, f"Domain @{domain}", "Standard / Individual", name.lower().replace(" ", "_")))
+        """, (name, cleaned_email, profile_type, org_name, "Standard / Individual", name.lower().replace(" ", "_")))
         emp_id = cursor.lastrowid
         conn.commit()
         conn.close()
@@ -291,12 +261,23 @@ def get_or_create_identity_profile(
         if anchor_name and anchor_name.strip() and anchor_name.strip() not in ["Target User", "Webmail Target"] and anchor_name.strip() != current_name:
             name_to_use = anchor_name.strip()
             should_update_name = True
-        elif any(char.isdigit() for char in current_name) and not any(char.isdigit() for char in parsed_better):
-            name_to_use = parsed_better
-            should_update_name = True
-        elif (" " not in current_name or current_name.lower().startswith("webmail") or current_name == "Target User") and (" " in parsed_better):
-            name_to_use = parsed_better
-            should_update_name = True
+        else:
+            # Check if authentic human full name was already verified in pivots table
+            cursor.execute("SELECT pivot_value FROM pivots WHERE employee_id = ? AND pivot_type = 'FULL_NAME' ORDER BY id DESC LIMIT 1", (emp_id,))
+            p_name_row = cursor.fetchone()
+            if p_name_row and p_name_row["pivot_value"]:
+                verified_name = p_name_row["pivot_value"].replace("Full Name: ", "").replace("Legal Identity: ", "").strip()
+                if verified_name and not any(char.isdigit() for char in verified_name) and verified_name != current_name:
+                    name_to_use = verified_name
+                    should_update_name = True
+
+            if not should_update_name:
+                if any(char.isdigit() for char in current_name) and not any(char.isdigit() for char in parsed_better):
+                    name_to_use = parsed_better
+                    should_update_name = True
+                elif (" " not in current_name or current_name.lower().startswith("webmail") or current_name == "Target User") and (" " in parsed_better):
+                    name_to_use = parsed_better
+                    should_update_name = True
 
         if should_update_name:
             cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (name_to_use, emp_id))
@@ -337,7 +318,7 @@ def get_or_create_identity_profile(
             conn_b.close()
             return get_employee_by_id(emp_id)
 
-        return dict(row)
+        return get_employee_by_id(emp_id)
 
 def reset_identity_profile(email: str) -> Dict[str, Any]:
     """Clears all breach records for an identity and restores clean status (0 score)."""

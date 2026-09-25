@@ -1,14 +1,14 @@
 from googlesearch import search
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
 
-query = 'Sjoerd Sikkema'
-print(f"Testing Google Search for: {query}")
-try:
-    results = list(search(query, num_results=6, advanced=True))
-    print(f"Google returned {len(results)} results:")
-    for r in results:
-        title = str(r.title).encode("ascii", "replace").decode("ascii")
-        url = str(r.url)
-        desc = str(r.description).encode("ascii", "replace").decode("ascii")
-        print(f"  Title: {title}\n  URL: {url}\n  Description: {desc[:100]}\n")
-except Exception as e:
-    print("Google search error:", e)
+for q in ['"Alje Woltjer"', 'site:linkedin.com/in "Alje Woltjer"', 'Alje Woltjer Vooruit']:
+    try:
+        results = list(search(q, num_results=5, advanced=True))
+        print(f"=== Query: {q} | Results: {len(results)} ===")
+        for r in results:
+            print("  Title:", r.title)
+            print("  URL:", r.url)
+            print("  Desc:", r.description[:100])
+    except Exception as e:
+        print(f"Google error for {q}: {e}")

@@ -25,10 +25,10 @@ class TestAIEngine(unittest.TestCase):
         self.sample_scan_data = {
             "employee": {
                 "id": 1,
-                "full_name": "Jordin Zwaan",
-                "corporate_email": "jordinzwaan2016@gmail.com",
+                "full_name": "Alex Morgan",
+                "corporate_email": "alex.morgan@cybercorp.io",
                 "job_title": "Threat Analyst",
-                "department": "Merlon Security",
+                "department": "Security Operations",
                 "vip_level": "Standard"
             },
             "spillover_score": {
@@ -50,7 +50,7 @@ class TestAIEngine(unittest.TestCase):
             "credentials": [
                 {
                     "id": 201,
-                    "domain_compromised": "vpn.merlon.corp",
+                    "domain_compromised": "vpn.cybercorp.io",
                     "plaintext_password": None,
                     "password_pattern": "StandardBase!2022",
                     "is_corporate_password_match": True
@@ -60,14 +60,14 @@ class TestAIEngine(unittest.TestCase):
                 {
                     "id": 301,
                     "pivot_type": "PUBLIC_PROFILE",
-                    "pivot_value": "GitHub: @sazeku123",
+                    "pivot_value": "GitHub: @alexm123",
                     "context_note": "Authenticated developer commits",
                     "confidence_score": 0.95
                 },
                 {
                     "id": 302,
                     "pivot_type": "SUSPECTED_ACCOUNT",
-                    "pivot_value": "Steam: @jordin99",
+                    "pivot_value": "Steam: @alexm99",
                     "context_note": "Unverified gaming alias",
                     "confidence_score": 0.55
                 }
@@ -86,8 +86,8 @@ class TestAIEngine(unittest.TestCase):
 
     def test_build_forensic_context(self):
         ctx = build_target_forensic_context(self.sample_scan_data)
-        self.assertIn("Jordin Zwaan", ctx)
-        self.assertIn("jordinzwaan2016@gmail.com", ctx)
+        self.assertIn("Alex Morgan", ctx)
+        self.assertIn("alex.morgan@cybercorp.io", ctx)
         self.assertIn("RedLine", ctx)
         self.assertIn("Sarpsborg", ctx)
 
@@ -146,7 +146,7 @@ class TestAIEngine(unittest.TestCase):
 
     def test_api_dossier_endpoint(self):
         resp = client.post("/api/ai/dossier", json={
-            "email": "jordinzwaan2016@gmail.com",
+            "email": "alex.morgan@cybercorp.io",
             "api_key": "",
             "provider": "groq",
             "scan_data": self.sample_scan_data
@@ -158,7 +158,7 @@ class TestAIEngine(unittest.TestCase):
 
     def test_api_copilot_endpoint(self):
         resp = client.post("/api/ai/copilot", json={
-            "email": "jordinzwaan2016@gmail.com",
+            "email": "alex.morgan@cybercorp.io",
             "message": "What is the highest risk vector?",
             "api_key": "",
             "provider": "groq",

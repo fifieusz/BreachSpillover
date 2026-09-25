@@ -69,39 +69,96 @@ def query_chess_profile(handle: str) -> Optional[Dict[str, Any]]:
 
 
 def query_steam_xml_profile(handle: str) -> Optional[Dict[str, Any]]:
-    """Queries Steam Community XML profile endpoint for authentic gamer personas."""
-    clean_h = handle.strip().lower()
-    if not clean_h or len(clean_h) < 3:
+    """Queries Steam Community XML profile endpoint for authentic gamer personas (handles vanity URLs, SteamID64, and full URLs)."""
+    raw_h = (handle or "").strip()
+    if not raw_h:
         return None
 
-    url = f"https://steamcommunity.com/id/{urllib.parse.quote(clean_h)}/?xml=1"
+    # Handle full Steam Community URLs
+    if "steamcommunity.com" in raw_h:
+        m_id = re.search(r'steamcommunity\.com/id/([a-zA-Z0-9_\-\.]+)', raw_h, re.I)
+        m_prof = re.search(r'steamcommunity\.com/profiles/(\d{15,25})', raw_h, re.I)
+        if m_id:
+            clean_h = m_id.group(1).strip()
+            url = f"https://steamcommunity.com/id/{urllib.parse.quote(clean_h)}/?xml=1"
+        elif m_prof:
+            clean_h = m_prof.group(1).strip()
+            url = f"https://steamcommunity.com/profiles/{clean_h}/?xml=1"
+        else:
+            return None
+    elif re.match(r'^\d{16,20}$', raw_h):
+        clean_h = raw_h
+        url = f"https://steamcommunity.com/profiles/{clean_h}/?xml=1"
+    else:
+        clean_h = raw_h.strip()
+        if len(clean_h) < 3:
+            return None
+        url = f"https://steamcommunity.com/id/{urllib.parse.quote(clean_h)}/?xml=1"
+
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/xml,text/xml"})
     try:
         with urllib.request.urlopen(req, timeout=3.5) as resp:
             if resp.status == 200:
                 xml = resp.read().decode("utf-8", errors="ignore")
-                steam_id_m = re.search(r'<steamID><!\[CDATA\[(.*?)\]\]></steamID>', xml)
+                steam_id_m = re.search(r'<steamID><!\[CDATA\[(.*?)\]\]></steamID>', xml) or re.search(r'<steamID>(.*?)</steamID>', xml)
                 if not steam_id_m:
                     return None
 
                 persona = steam_id_m.group(1).strip()
-                real_m = re.search(r'<realname><!\[CDATA\[(.*?)\]\]></realname>', xml)
+                id64_m = re.search(r'<steamID64>(.*?)</steamID64>', xml)
+                steam_id_64 = id64_m.group(1).strip() if id64_m else None
+
+                custom_url_m = re.search(r'<customURL><!\[CDATA\[(.*?)\]\]></customURL>', xml) or re.search(r'<customURL>(.*?)</customURL>', xml)
+                custom_url = custom_url_m.group(1).strip() if custom_url_m else None
+
+                real_m = re.search(r'<realname><!\[CDATA\[(.*?)\]\]></realname>', xml) or re.search(r'<realname>(.*?)</realname>', xml)
                 real_name = real_m.group(1).strip() if real_m else None
-                loc_m = re.search(r'<location><!\[CDATA\[(.*?)\]\]></location>', xml)
+
+                loc_m = re.search(r'<location><!\[CDATA\[(.*?)\]\]></location>', xml) or re.search(r'<location>(.*?)</location>', xml)
                 loc_str = loc_m.group(1).strip() if loc_m else None
-                avatar_m = re.search(r'<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>', xml)
+
+                avatar_m = re.search(r'<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>', xml) or re.search(r'<avatarFull>(.*?)</avatarFull>', xml)
                 avatar_u = avatar_m.group(1).strip() if avatar_m else None
+
+                sum_m = re.search(r'<summary><!\[CDATA\[(.*?)\]\]></summary>', xml, re.DOTALL) or re.search(r'<summary>(.*?)</summary>', xml, re.DOTALL)
+                summary_raw = sum_m.group(1).strip() if sum_m else ""
+                clean_summary = re.sub(r'<[^>]+>', ' ', summary_raw).strip()
+
+                final_url = f"https://steamcommunity.com/id/{custom_url}" if custom_url else (f"https://steamcommunity.com/profiles/{steam_id_64}" if steam_id_64 else f"https://steamcommunity.com/id/{clean_h}")
+
+                ctx_parts = []
+                if steam_id_64:
+                    ctx_parts.append(f"SteamID64: {steam_id_64}")
+                if persona:
+                    ctx_parts.append(f"Persona: '{persona}'")
+                if real_name:
+                    ctx_parts.append(f"Real Name: {real_name}")
+                if loc_str:
+                    ctx_parts.append(f"Location: {loc_str}")
+                if clean_summary:
+                    ctx_parts.append(f"Bio: {clean_summary[:120]}")
+
+                # Short handle vanity collision protection
+                is_short = len(clean_h) <= 4 and not re.match(r'^\d+$', clean_h)
+                is_persona_discordant = is_short and persona.lower() != clean_h.lower()
 
                 return {
                     "platform": "Steam",
-                    "handle": clean_h,
-                    "url": f"https://steamcommunity.com/id/{clean_h}",
+                    "handle": custom_url or clean_h,
+                    "url": final_url,
+                    "profile_url": final_url,
                     "persona_name": persona,
+                    "name": persona,
+                    "custom_url": custom_url,
+                    "steam_id_64": steam_id_64,
                     "real_name": real_name,
                     "location": loc_str,
+                    "summary": clean_summary,
                     "avatar_url": avatar_u,
-                    "is_verified": bool(persona or real_name),
-                    "confidence": 0.90 if real_name else 0.85
+                    "is_verified": bool(not is_persona_discordant and (persona or real_name)),
+                    "is_suspected": bool(is_persona_discordant),
+                    "confidence": 0.50 if is_persona_discordant else (0.90 if real_name else 0.85),
+                    "context": f"Active Steam Community gaming profile ({' • '.join(ctx_parts)})"
                 }
     except Exception:
         pass

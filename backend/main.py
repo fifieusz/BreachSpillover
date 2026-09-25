@@ -66,6 +66,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def add_no_cache_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 # Ensure database is initialized
 init_db()
 
@@ -136,6 +144,57 @@ def verify_declass_passcode(req: PasscodeVerificationRequest):
         return {"success": True, "authorized": True, "message": "Security declassification authorization approved"}
     raise HTTPException(status_code=401, detail="Access Denied: Invalid Security Authorization Passcode")
 
+@app.get("/api/bridge/status")
+def get_browser_bridge_status():
+    """Returns the operational status of the Local Investigator Browser Bridge."""
+    from backend.browser_bridge import inspect_bridge_status
+    return inspect_bridge_status()
+
+class GoogleAuthRequest(BaseModel):
+    email: str
+    name: Optional[str] = None
+
+@app.post("/api/auth/google")
+def auth_google_login(req: GoogleAuthRequest):
+    """Authenticates the investigator via their Google account and verifies scraper authenticator."""
+    from backend.browser_bridge import login_google_account
+    return login_google_account(req.email, req.name)
+
+@app.post("/api/auth/logout")
+@app.get("/api/auth/logout")
+def auth_logout():
+    """Logs out the active investigator session."""
+    from backend.browser_bridge import logout_account
+    return logout_account()
+
+class BridgeLoginRequest(BaseModel):
+    flow: Optional[str] = "google"
+
+@app.post("/api/bridge/login")
+def trigger_investigator_login(req: Optional[BridgeLoginRequest] = None):
+    """Launches the dedicated browser window for one-time investigator authentication."""
+    from backend.browser_bridge import launch_investigator_login_window
+    flow = req.flow if req else "google"
+    return launch_investigator_login_window(flow=flow)
+
+class BridgeCookieRequest(BaseModel):
+    cookie: str
+
+@app.post("/api/bridge/cookie")
+def set_manual_bridge_cookie(req: BridgeCookieRequest):
+    """Sets or clears the manual LinkedIn session cookie and persists it to disk."""
+    from backend.browser_bridge import save_persisted_session, clear_persisted_session
+    c = req.cookie.strip()
+    if c:
+        ok = save_persisted_session(c)
+        if ok:
+            return {"success": True, "message": "LinkedIn session cookie configured and saved permanently."}
+        else:
+            return {"success": False, "message": "Invalid cookie token."}
+    else:
+        clear_persisted_session()
+        return {"success": True, "message": "LinkedIn session cookie cleared."}
+
 @app.get("/api/search")
 @app.get("/api/scan")
 def search_exposure(
@@ -162,7 +221,7 @@ def search_exposure(
         raise HTTPException(status_code=400, detail="Target email or username query is required.")
 
     # Composite query decomposition: extract email and name if user entered combined query
-    # e.g. "Amir Secic 3gbxdd@gmail.com", "3gbxdd@gmail.com (Amir Secic)", "Amir Secic <3gbxdd@gmail.com>"
+    # e.g. "Alex Morgan alex@example.com", "alex@example.com (Alex Morgan)", "Alex Morgan <alex@example.com>"
     email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', raw_target)
     if email_match:
         extracted_email = email_match.group(0).lower()
@@ -274,6 +333,7 @@ def search_exposure(
         "job_title": employee["job_title"],
         "department": employee["department"],
         "vip_level": employee["vip_level"],
+        "avatar_seed": employee["avatar_seed"],
         "created_at": employee["created_at"]
     }
 
@@ -478,6 +538,361 @@ def search_exposure(
         "cross_target_correlations": cross_correlations,
         "scenario": scenario or ("clean" if spillover["score"] == 0 else "full")
     }
+
+class ProfileIngestRequest(BaseModel):
+    target_email: Optional[str] = None
+    target_name: Optional[str] = None
+    platform: str = "LinkedIn"
+    profile_url: str
+    headline: Optional[str] = None
+    current_company: Optional[str] = None
+    location: Optional[str] = None
+    about: Optional[str] = None
+    experience: Optional[List[Dict[str, Any]]] = None
+    avatar_url: Optional[str] = None
+
+@app.post("/api/profile/ingest")
+def ingest_profile_data(req: ProfileIngestRequest):
+    """
+    Ingests live profile data captured from the investigator's browser or external OSINT tool.
+    Correlates workplace, location, headline, and career history directly into the target dossier.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+
+    emp_id = None
+    if req.target_email:
+        cur.execute("SELECT id FROM employees WHERE LOWER(corporate_email) = LOWER(?)", (req.target_email.strip(),))
+        row = cur.fetchone()
+        if row:
+            emp_id = row["id"]
+    if not emp_id and req.target_name:
+        cur.execute("SELECT id FROM employees WHERE LOWER(full_name) = LOWER(?)", (req.target_name.strip(),))
+        row = cur.fetchone()
+        if row:
+            emp_id = row["id"]
+
+    if not emp_id and req.target_email:
+        emp = get_or_create_identity_profile(req.target_email.strip())
+        emp_id = emp["id"]
+
+    if not emp_id:
+        clean_url = req.profile_url.strip()
+        slug = clean_url.rstrip("/").split("/")[-1].lower()
+        cur.execute("SELECT employee_id FROM pivots WHERE LOWER(pivot_value) LIKE ? LIMIT 1", (f"%{slug}%",))
+        p_row = cur.fetchone()
+        if p_row:
+            emp_id = p_row["employee_id"]
+
+    if not emp_id:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Target employee identity could not be matched. Please investigate the target email first.")
+
+    cur.execute("SELECT corporate_email, department FROM employees WHERE id = ?", (emp_id,))
+    emp_row = cur.fetchone()
+    corp_email = emp_row["corporate_email"] if emp_row else (req.target_email or "")
+    curr_dept = emp_row["department"] if emp_row else ""
+
+    updates = []
+    params = []
+    if req.headline:
+        updates.append("job_title = ?")
+        params.append(req.headline.strip())
+    if req.current_company:
+        comp = req.current_company.strip()
+        # Derive corporate domain stem
+        domain_stem = ""
+        if corp_email and "@" in corp_email:
+            d_host = corp_email.split("@")[-1].lower()
+            stem = d_host.split(".")[0].capitalize()
+            if stem.lower() not in ["gmail", "hotmail", "outlook", "yahoo", "icloud", "proton", "protonmail"]:
+                domain_stem = stem
+
+        dept_str = comp
+        if domain_stem and domain_stem.lower() != comp.lower():
+            dept_str = f"{comp} • {domain_stem}"
+        elif curr_dept and curr_dept.lower() != comp.lower() and "corporate identity" not in curr_dept.lower():
+            existing_parts = [p.strip() for p in curr_dept.split("•") if p.strip()]
+            if comp not in existing_parts:
+                dept_str = f"{comp} • {existing_parts[0]}"
+
+        updates.append("department = ?")
+        params.append(dept_str)
+    if req.avatar_url and "profile-framedphoto" not in req.avatar_url:
+        updates.append("avatar_seed = ?")
+        params.append(req.avatar_url.strip())
+    if updates:
+        params.append(emp_id)
+        cur.execute(f"UPDATE employees SET {', '.join(updates)} WHERE id = ?", tuple(params))
+
+    clean_url = req.profile_url.strip()
+    slug = clean_url.rstrip("/").split("/")[-1]
+
+    # Only purge duplicate pivots for THIS specific company and role; preserve other verified employers (e.g. Vooruit)!
+    if req.current_company:
+        comp = req.current_company.strip()
+        cur.execute("""
+            DELETE FROM pivots 
+            WHERE employee_id = ? 
+              AND pivot_type = 'WORKPLACE'
+              AND (pivot_value = ? OR pivot_value LIKE ?)
+        """, (emp_id, f"Employer: {comp}", f"Role:%{comp}%"))
+
+        cur.execute("""
+            INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+            VALUES (?, NULL, 'WORKPLACE', ?, 0.99, ?)
+        """, (
+            emp_id,
+            f"Employer: {comp}",
+            f"Current active organization: {comp} • Role: {req.headline or 'Executive / Professional'} [STATUS: VERIFIED]"
+        ))
+        if req.headline and req.headline.lower() != "professional role":
+            cur.execute("""
+                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                VALUES (?, NULL, 'WORKPLACE', ?, 0.98, ?)
+            """, (
+                emp_id,
+                f"Role: {req.headline} at {comp}",
+                f"Verified executive/specialist role: {req.headline} [STATUS: VERIFIED]"
+            ))
+
+        # Corroborate domain employer if distinct
+        domain_stem = ""
+        if corp_email and "@" in corp_email:
+            d_host = corp_email.split("@")[-1].lower()
+            stem = d_host.split(".")[0].capitalize()
+            if stem.lower() not in ["gmail", "hotmail", "outlook", "yahoo", "icloud", "proton", "protonmail"]:
+                domain_stem = stem
+        if domain_stem and domain_stem.lower() != comp.lower():
+            cur.execute("SELECT id FROM pivots WHERE employee_id = ? AND pivot_type = 'WORKPLACE' AND pivot_value LIKE ?", (emp_id, f"Employer: {domain_stem}%"))
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                    VALUES (?, NULL, 'WORKPLACE', ?, 0.95, ?)
+                """, (
+                    emp_id,
+                    f"Employer: {domain_stem}",
+                    f"Corporate domain & entity affiliation tied to {corp_email} [STATUS: VERIFIED]"
+                ))
+
+    # Purge existing duplicate or suspected entries for this platform
+    cur.execute("""
+        DELETE FROM pivots
+        WHERE employee_id = ?
+          AND (
+            (pivot_type = 'SUSPECTED_ACCOUNT' AND (pivot_value LIKE ? OR context_note LIKE ?))
+            OR (pivot_type = 'PUBLIC_PROFILE' AND pivot_value LIKE ?)
+          )
+    """, (emp_id, f"%{req.platform}%", f"%{req.platform.lower()}%", f"{req.platform}%"))
+
+    cur.execute("""
+        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+        VALUES (?, NULL, 'PUBLIC_PROFILE', ?, 0.99, ?)
+    """, (
+        emp_id,
+        f"{req.platform}: @{slug}",
+        f"Verified {req.platform} Profile: {req.headline or clean_url} [URL: {clean_url}] [STATUS: VERIFIED]"
+    ))
+
+    # Purge any leaked framedphoto from pivots
+    cur.execute("""
+        DELETE FROM pivots
+        WHERE employee_id = ?
+          AND pivot_type = 'AVATAR_CORRELATION'
+          AND (pivot_value LIKE '%profile-framedphoto%' OR context_note LIKE '%profile-framedphoto%')
+    """, (emp_id,))
+
+    if req.avatar_url and "profile-framedphoto" not in req.avatar_url:
+        cur.execute("""
+            DELETE FROM pivots 
+            WHERE employee_id = ? AND pivot_type = 'AVATAR_CORRELATION' AND (pivot_value LIKE ? OR context_note LIKE ?)
+        """, (emp_id, f"%{req.platform}%", f"%{req.platform.lower()}%"))
+        cur.execute("""
+            INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+            VALUES (?, NULL, 'AVATAR_CORRELATION', ?, 0.98, ?)
+        """, (
+            emp_id,
+            f"{req.platform} Avatar: {req.avatar_url.strip()}",
+            f"[TIED: {req.platform} Profile] High-resolution verified profile photo from {req.platform} [URL: {req.avatar_url.strip()}] [STATUS: VERIFIED]"
+        ))
+
+    if req.experience:
+        cur.execute("""
+            DELETE FROM pivots
+            WHERE employee_id = ? AND pivot_type = 'TIMELINE' AND context_note LIKE ?
+        """, (emp_id, f"%{req.platform}%"))
+        for exp in req.experience:
+            role = exp.get("role") or exp.get("title") or "Role"
+            comp = exp.get("company") or "Company"
+            dur = exp.get("duration") or exp.get("period") or "Historical"
+            cur.execute("""
+                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                VALUES (?, NULL, 'TIMELINE', ?, 0.95, ?)
+            """, (
+                emp_id,
+                f"{dur}: {role} at {comp}",
+                f"Career experience verified via {req.platform} [Category: Career] [STATUS: VERIFIED]"
+            ))
+            if comp and comp.lower() != (req.current_company or "").lower():
+                cur.execute("SELECT id FROM pivots WHERE employee_id = ? AND pivot_type = 'WORKPLACE' AND pivot_value LIKE ?", (emp_id, f"Employer: {comp}%"))
+                if not cur.fetchone():
+                    cur.execute("""
+                        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                        VALUES (?, NULL, 'WORKPLACE', ?, 0.92, ?)
+                    """, (
+                        emp_id,
+                        f"Employer: {comp} ({role})",
+                        f"Career experience verified from {req.platform}: {role} ({dur}) [STATUS: VERIFIED]"
+                    ))
+
+    if req.location:
+        from backend.osint_scanner import resolve_global_location
+        loc_geo = resolve_global_location(req.location)
+        cur.execute("""
+            INSERT INTO physical_footprints (employee_id, source_leak_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
+            VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 'PUBLIC_PROFILE_GEO')
+        """, (
+            emp_id,
+            f"{req.platform} Registered Location",
+            loc_geo.get("city", req.location),
+            loc_geo.get("postal_code", "N/A"),
+            loc_geo.get("country", "International"),
+            loc_geo.get("latitude"),
+            loc_geo.get("longitude")
+        ))
+
+    conn.commit()
+    conn.close()
+    return {"success": True, "employee_id": emp_id, "message": f"Successfully ingested {req.platform} profile data into target dossier"}
+
+class BrowserSyncRequest(BaseModel):
+    profile_url: str
+    target_email: Optional[str] = None
+    target_name: Optional[str] = None
+
+@app.get("/api/browser/status")
+def get_browser_runner_status():
+    """
+    Returns the persistent browser session status, indicating whether the local
+    background browser runner is authenticated for LinkedIn zero-auth scraping.
+    """
+    from backend.browser_runner import is_browser_authenticated
+    return is_browser_authenticated()
+
+@app.post("/api/browser/launch")
+def launch_browser_for_auth():
+    """
+    Opens an interactive browser window using the persistent profile
+    so the investigator can log into LinkedIn once (via Google SSO or password).
+    """
+    from backend.browser_runner import launch_interactive_login
+    return launch_interactive_login()
+
+@app.post("/api/browser/sync_target")
+def sync_browser_target_profile(req: BrowserSyncRequest):
+    """
+    Autonomously executes headless browser extraction for the target profile URL
+    and ingests current workplace (e.g. Merlon Security) and past roles into the dossier.
+    """
+    from backend.browser_runner import auto_enrich_target_from_browser
+    return auto_enrich_target_from_browser(
+        profile_url=req.profile_url,
+        target_email=req.target_email,
+        target_name=req.target_name
+    )
+
+class UnblockerKeyRequest(BaseModel):
+    provider: str = "scraperapi"
+    api_key: str
+
+@app.get("/api/unblocker/status")
+def get_unblocker_status():
+    """Returns whether a universal web unblocker API key is configured."""
+    from backend.unblocker_client import resolve_unblocker_config
+    cfg = resolve_unblocker_config()
+    k = cfg.get("api_key") or ""
+    masked = f"{k[:4]}...{k[-4:]}" if len(k) > 8 else ("Set" if k else "None")
+    return {
+        "configured": bool(k),
+        "provider": cfg.get("provider"),
+        "masked_key": masked
+    }
+
+@app.post("/api/unblocker/save_key")
+def save_unblocker_key(req: UnblockerKeyRequest):
+    """Saves a ScraperAPI / ScrapingBee / ZenRows API key into .env and runtime memory."""
+    key = req.api_key.strip()
+    provider = req.provider.lower().strip() or "scraperapi"
+    
+    env_var = "SCRAPER_API_KEY"
+    if "scrapingbee" in provider:
+        env_var = "SCRAPINGBEE_API_KEY"
+    elif "zenrows" in provider:
+        env_var = "ZENROWS_API_KEY"
+        
+    os.environ[env_var] = key
+    
+    env_path = BASE_DIR / ".env"
+    lines = []
+    if env_path.exists():
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            
+    updated = False
+    new_lines = []
+    for line in lines:
+        if line.startswith(f"{env_var}="):
+            new_lines.append(f"{env_var}={key}\n")
+            updated = True
+        else:
+            new_lines.append(line)
+            
+    if not updated:
+        new_lines.append(f"\n# Universal Web Unblocker API Key\n{env_var}={key}\n")
+        
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+        
+    return {
+        "success": True,
+        "provider": provider,
+        "message": f"Successfully configured {env_var}. HTTP 999 anti-scraping blocks are now bypassed automatically."
+    }
+
+class LinkedInCookieSaveRequest(BaseModel):
+    cookie: str
+    jsessionid: Optional[str] = None
+
+class LinkedInCookieVerifyRequest(BaseModel):
+    cookie: Optional[str] = None
+    jsessionid: Optional[str] = None
+
+@app.get("/api/sessions/status")
+def get_sessions_status(check_live: bool = False):
+    """
+    Returns the status of all available investigator sessions and API keys (.env).
+    If check_live=True, actively tests the LinkedIn session against Voyager API.
+    """
+    from backend.session_vault import get_vault_summary
+    return get_vault_summary(check_live=check_live)
+
+@app.post("/api/sessions/verify_linkedin")
+def api_verify_linkedin_session(req: LinkedInCookieVerifyRequest = None):
+    """
+    Actively tests if the LinkedIn li_at cookie and optional JSESSIONID are valid, returning account name and status.
+    """
+    from backend.session_vault import verify_linkedin_cookie
+    cookie = req.cookie if req else None
+    jsessionid = req.jsessionid if req else None
+    return verify_linkedin_cookie(cookie=cookie, jsessionid=jsessionid)
+
+@app.post("/api/sessions/save_linkedin")
+def api_save_linkedin_cookie(req: LinkedInCookieSaveRequest):
+    """
+    Saves newly provided LinkedIn credentials (li_at and optionally JSESSIONID) to .env and tests validity.
+    """
+    from backend.session_vault import save_linkedin_cookie_to_env
+    return save_linkedin_cookie_to_env(cookie_str=req.cookie, jsessionid_str=req.jsessionid)
 
 class CombolistImportRequest(BaseModel):
     raw_text: str

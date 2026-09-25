@@ -13,7 +13,11 @@ import re
 import base64
 import urllib.parse
 import urllib.request
-from typing import Dict, Any, List, Optional, Set
+import concurrent.futures
+import logging
+from typing import Dict, Any, List, Optional, Set, Tuple
+
+logger = logging.getLogger("BreachSpillover.WebDorkRecon")
 
 from backend.ai_engine import call_groq_api, resolve_api_key, load_dotenv
 
@@ -163,7 +167,7 @@ def extract_valid_facebook_profile(
             if re.search(rf'\b{re.escape(first_name)}\b', combined_text) and re.search(rf'\b{re.escape(last_name)}\b', combined_text):
                 name_matched = True
 
-        # 2. Slug matches target handle or full name pattern (e.g. Jordin-Zwaan-10000... or jordin.zwaan)
+        # 2. Slug matches target handle or full name pattern (e.g. FirstName-LastName-10000... or firstname.lastname)
         slug_matched = False
         slug_clean = slug_only.replace(".", "").replace("-", "").replace("_", "").lower()
         if any(h.replace(".", "").replace("-", "").lower() in slug_clean for h in handles if len(h) >= 4):
@@ -210,22 +214,34 @@ def query_duckduckgo_lite(query: str, max_results: int = 10) -> List[Dict[str, s
             html = resp.read().decode('utf-8', errors='ignore')
 
         _DDG_FAILED_COUNT = 0
-        a_tags = re.findall(r'<a[^>]+class=[\'"]result-link[\'"][^>]*href=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</a>', html, re.DOTALL)
-        snip_tags = re.findall(r'<td[^>]+class=[\'"]result-snippet[\'"][^>]*>(.*?)</td>', html, re.DOTALL)
-        for i in range(min(len(a_tags), len(snip_tags), max_results)):
-            href, raw_title = a_tags[i]
-            title = re.sub(r'<[^>]+>', '', raw_title).strip()
-            snip = re.sub(r'<[^>]+>', ' ', snip_tags[i])
-            snip = re.sub(r'\s+', ' ', snip).strip()
-            if href and "duckduckgo.com" not in href:
-                if "uddg=" in href:
-                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
-                    href = qs.get("uddg", [href])[0]
-                snippets.append({
-                    "title": title,
-                    "url": href,
-                    "snippet": snip
-                })
+        rows = re.findall(r'<tr[^>]*>([\s\S]*?)</tr>', html)
+        i = 0
+        while i < len(rows) and len(snippets) < max_results:
+            r = rows[i]
+            link_m = re.search(r'<a[^>]+href=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</a>', r)
+            if link_m and ("result-link" in r or "rel=\"nofollow\"" in r):
+                href = link_m.group(1)
+                raw_title = link_m.group(2)
+                title = re.sub(r'<[^>]+>', '', raw_title).strip()
+
+                snippet = ""
+                if i + 1 < len(rows):
+                    next_r = rows[i + 1]
+                    snip_m = re.search(r'<td[^>]+class=[\'"]result-snippet[\'"][^>]*>([\s\S]*?)</td>', next_r)
+                    if snip_m:
+                        snippet = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', snip_m.group(1))).strip()
+                        i += 1
+
+                if href and "duckduckgo.com" not in href:
+                    if "uddg=" in href:
+                        qs = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                        href = qs.get("uddg", [href])[0]
+                    snippets.append({
+                        "title": title,
+                        "url": href,
+                        "snippet": snippet
+                    })
+            i += 1
     except Exception:
         _DDG_FAILED_COUNT += 1
     return snippets
@@ -261,52 +277,93 @@ def query_bing_search(query: str, max_results: int = 10) -> List[Dict[str, str]]
     snippets: List[Dict[str, str]] = []
     try:
         url = "https://www.bing.com/search?q=" + urllib.parse.quote(query)
-        req = urllib.request.Request(url, headers={
-            'User-Agent': USER_AGENT_DESKTOP,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9'
-        })
-        with urllib.request.urlopen(req, timeout=4.0) as resp:
-            html = resp.read().decode('utf-8', errors='ignore')
+        html = None
+        try:
+            from curl_cffi import requests
+            headers = {
+                'User-Agent': USER_AGENT_DESKTOP,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9'
+            }
+            resp = requests.get(url, headers=headers, impersonate="chrome124", timeout=4.0)
+            if resp.status_code == 200:
+                html = resp.text
+        except Exception:
+            pass
+
+        if not html:
+            req = urllib.request.Request(url, headers={
+                'User-Agent': USER_AGENT_DESKTOP,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9'
+            })
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
+                html = resp.read().decode('utf-8', errors='ignore')
 
         html_low = html.lower()
-        if "searchnoresult" in html_low or "there are no results for" in html_low or "ingen resultater" in html_low or "ingen treff" in html_low:
+        if "there are no results for" in html_low or "ingen resultater for" in html_low or "ingen treff for" in html_low:
             return []
 
         query_terms = [t.lower() for t in re.findall(r'[a-zA-Z0-9]+', query) if len(t) >= 3 and t.lower() not in ["site", "http", "https", "com", "www", "org", "net"]]
 
         blocks = re.findall(r'<li class="b_algo"[^>]*>([\s\S]*?)</li>', html)
         for b in blocks[:max_results]:
-            a_matches = re.findall(r'<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>', b)
             target_url = None
             title = None
             snippet = ""
 
-            for href, text_content in a_matches:
-                clean_text = re.sub(r'<[^>]+>', '', text_content).strip()
-                clean_href = href.replace('&amp;', '&')
+            # Primary: Extract title and URL directly from the result's <h2> heading anchor
+            h2_m = re.search(r'<h2[^>]*>([\s\S]*?)</h2>', b)
+            if h2_m:
+                a_m = re.search(r'<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>', h2_m.group(1))
+                if a_m:
+                    raw_href = a_m.group(1).replace('&amp;', '&')
+                    raw_title = re.sub(r'<[^>]+>', '', a_m.group(2)).strip()
+                    title = raw_title
 
-                # Check if direct http URL
-                if clean_href.startswith('http') and 'bing.com' not in clean_href and 'microsoft.com' not in clean_href:
-                    target_url = clean_href
-                    title = clean_text
-                    break
+                    if raw_href.startswith('http') and 'bing.com' not in raw_href and 'microsoft.com' not in raw_href:
+                        target_url = raw_href
+                    elif 'bing.com/ck/a' in raw_href:
+                        qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_href).query)
+                        u_param = qs.get('u', [''])[0]
+                        if u_param.startswith('a1'):
+                            b64 = u_param[2:]
+                            b64 += '=' * ((4 - len(b64) % 4) % 4)
+                            try:
+                                dec = base64.urlsafe_b64decode(b64).decode('utf-8', errors='ignore')
+                                if dec.startswith('http') and 'bing.com' not in dec and 'microsoft.com' not in dec:
+                                    target_url = dec
+                            except Exception:
+                                pass
 
-                # Decode Bing ck/a redirect
-                if 'bing.com/ck/a' in clean_href:
-                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(clean_href).query)
-                    u_param = qs.get('u', [''])[0]
-                    if u_param.startswith('a1'):
-                        b64 = u_param[2:]
-                        b64 += '=' * ((4 - len(b64) % 4) % 4)
-                        try:
-                            dec = base64.urlsafe_b64decode(b64).decode('utf-8', errors='ignore')
-                            if dec.startswith('http') and 'bing.com' not in dec and 'microsoft.com' not in dec:
-                                target_url = dec
-                                if clean_text and len(clean_text) > 3 and not clean_text.startswith('http'):
-                                    title = clean_text
-                        except Exception:
-                            pass
+            # Fallback: scan any child anchors if h2 didn't yield target URL
+            if not target_url:
+                a_matches = re.findall(r'<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>', b)
+                for href, text_content in a_matches:
+                    clean_text = re.sub(r'<[^>]+>', '', text_content).strip()
+                    clean_href = href.replace('&amp;', '&')
+
+                    if clean_href.startswith('http') and 'bing.com' not in clean_href and 'microsoft.com' not in clean_href:
+                        target_url = clean_href
+                        if not title:
+                            title = clean_text
+                        break
+
+                    if 'bing.com/ck/a' in clean_href:
+                        qs = urllib.parse.parse_qs(urllib.parse.urlparse(clean_href).query)
+                        u_param = qs.get('u', [''])[0]
+                        if u_param.startswith('a1'):
+                            b64 = u_param[2:]
+                            b64 += '=' * ((4 - len(b64) % 4) % 4)
+                            try:
+                                dec = base64.urlsafe_b64decode(b64).decode('utf-8', errors='ignore')
+                                if dec.startswith('http') and 'bing.com' not in dec and 'microsoft.com' not in dec:
+                                    target_url = dec
+                                    if not title and clean_text and len(clean_text) > 3 and not clean_text.startswith('http'):
+                                        title = clean_text
+                                    break
+                            except Exception:
+                                pass
 
             p_match = re.search(r'<p[^>]*>([\s\S]*?)</p>', b)
             if p_match:
@@ -329,24 +386,69 @@ def query_bing_search(query: str, max_results: int = 10) -> List[Dict[str, str]]
 def query_search_snippets(query: str, max_results: int = 10) -> List[Dict[str, str]]:
     """
     Executes a search request against public search endpoints and parses result URLs, titles, and descriptive snippets.
-    Combines DuckDuckGo Lite, Bing Search, DuckDuckGo HTML, and Yahoo Search with resilient fallback.
+    Combines Bing Search, DuckDuckGo Lite, DuckDuckGo HTML, and Yahoo Search with resilient fallback.
     """
     global _DDG_FAILED_COUNT
     snippets: List[Dict[str, str]] = []
     seen_urls: Set[str] = set()
 
-    # Step 1: Query DuckDuckGo Lite
-    lite_snips = query_duckduckgo_lite(query, max_results=max_results)
-    for s in lite_snips:
+    # Step 0: High-reliability Unblocker Search (Scrape.do / ScraperAPI) if configured
+    global _UNBLOCKER_DISABLED
+    if not globals().get("_UNBLOCKER_DISABLED", False):
+        try:
+            from backend.unblocker_client import resolve_unblocker_config
+            cfg = resolve_unblocker_config()
+            token = cfg.get("api_key")
+            if token:
+                target_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+                if cfg.get("provider") == "scrapedo":
+                    scrape_url = f"https://api.scrape.do?token={token}&url={urllib.parse.quote(target_url)}"
+                else:
+                    scrape_url = f"http://api.scraperapi.com?api_key={token}&url={urllib.parse.quote(target_url)}"
+
+                req = urllib.request.Request(scrape_url, headers={"User-Agent": USER_AGENT_DESKTOP})
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                    html = resp.read().decode("utf-8", errors="ignore")
+                    blocks = re.findall(r'<div class="result results_links[^"]*"[^>]*>(.*?)</div>\s*</div>', html, re.DOTALL)
+                    for b in blocks[:max_results]:
+                        title_m = re.search(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b)
+                        snip_m = re.search(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', b, re.DOTALL)
+                        clean_text = re.sub(r'<[^>]+>', ' ', b)
+                        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+                        if title_m:
+                            raw_href = title_m.group(1)
+                            qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_href).query)
+                            clean_url = qs.get("uddg", [raw_href])[0]
+                            title = re.sub(r'<[^>]+>', '', title_m.group(2)).strip()
+                            snip = re.sub(r'<[^>]+>', '', snip_m.group(1)).strip() if snip_m else clean_text
+                            if "duckduckgo.com" not in clean_url and clean_url not in seen_urls:
+                                seen_urls.add(clean_url)
+                                snippets.append({
+                                    "title": title,
+                                    "url": clean_url,
+                                    "snippet": snip[:350]
+                                })
+                if len(snippets) >= 3:
+                    return snippets
+        except urllib.error.HTTPError as he:
+            if he.code in (401, 402, 403, 429):
+                _UNBLOCKER_DISABLED = True
+                logger.info(f"Unblocker API key returned {he.code} (quota/unauthorized). Bypassing unblocker.")
+        except Exception as e:
+            logger.debug(f"Unblocker search notice: {e}")
+
+    # Step 1: Query Bing Search first (fastest, decodes real target URLs and rich snippets)
+    bing_snips = query_bing_search(query, max_results=max_results)
+    for s in bing_snips:
         u = s.get("url")
         if u and u not in seen_urls:
             seen_urls.add(u)
             snippets.append(s)
 
-    # Step 2: Query Bing Search (decodes real target URLs and rich snippets)
+    # Step 2: Query DuckDuckGo Lite if more results needed
     if len(snippets) < max_results:
-        bing_snips = query_bing_search(query, max_results=max_results)
-        for s in bing_snips:
+        lite_snips = query_duckduckgo_lite(query, max_results=max_results - len(snippets))
+        for s in lite_snips:
             u = s.get("url")
             if u and u not in seen_urls:
                 seen_urls.add(u)
@@ -586,19 +688,19 @@ Raw Live Search Snippets & Web Footprints Retrieved for Target:
 Verification Guidelines:
 1. Strict Entity Disambiguation (Prune False Positives):
    - Only corroborate snippets that genuinely belong to the target entity.
-   - REJECT stranger profiles: for instance, if the target is a male Dutch resident / student named Jordin Zwaan, REJECT female lifestyle / model / blogger accounts (e.g. @jjjordin, @jordinlaine) or unrelated users who happen to share a common first name.
-   - REJECT individuals with different surnames or distinct personas (e.g. Jordan van der Zwaan, Joris Zwaan, Jordan Zwaard).
-   - Only accept social accounts (Facebook, LinkedIn, Portfolio, Instagram, GitHub) where the handle, full name, or biography clearly corroborates the target's identity.
+   - REJECT stranger profiles: if the target has a specific given name and surname, REJECT unrelated accounts that merely share a common first name, generic handle fragment, or differing surname.
+   - REJECT individuals with distinct conflicting professions, countries, or identities.
+   - Only accept social and web profiles (e.g. LinkedIn, Facebook, Portfolio, Instagram, GitHub) where the handle, full name, email, or biography explicitly corroborates the target's identity.
 2. Verified Attributes Extraction:
-   - Physical Location: Look for explicit residential declarations in Dutch or English (e.g. 'ik woon in <City>', 'Lives in <City>', 'based in <City>'). Extract the exact confirmed city (e.g. 'Wolvega'), province, and country ('Netherlands').
-   - Workplace / Education: Extract confirmed educational institutions (e.g. 'Deltion College', 'Amsterdam University of Applied Sciences - AUAS') and companies/employers (e.g. 'Merlon Security', 'Copyboss').
+   - Physical Location: Look for explicit residential declarations (e.g. 'lives in <City>', 'based in <City>', 'resident of <City>'). Extract the confirmed city, region/province, and country.
+   - Workplace / Education: Extract confirmed educational institutions, universities, employers, and companies.
    - Verified Profiles: Extract confirmed URLs matching the target's identity.
 
 Respond ONLY with valid JSON in this exact structure:
 {{
   "is_corroborated": true,
   "confidence_score": 0.95,
-  "full_name_candidate": "Full verified legal or expanded name discovered (including middle names, e.g. 'Yasir Ashraf Kadim') or null",
+  "full_name_candidate": "Full verified legal or expanded name discovered (including middle names, e.g. 'Alexander Vance Morgan') or null",
   "location": {{
     "city": "Exact city name or null",
     "country": "Country name or null",
@@ -743,7 +845,7 @@ def heuristic_fallback_disambiguation(
         result["is_corroborated"] = True
         result["confidence_score"] = max(result["confidence_score"], 0.88)
 
-        # Check for full legal name candidate with middle names (e.g. Yasir Ashraf Kadim)
+        # Check for full legal name candidate with middle names (e.g. multi-token expanded legal name)
         if first_name and last_name:
             prefix = last_name[:4] if len(last_name) >= 4 else last_name
             full_pattern = re.compile(
@@ -901,67 +1003,98 @@ def execute_ai_dork_recon(
     ]
 
     discovered_personal_sites: List[Dict[str, Any]] = []
-    for h in candidate_handles[:4]:
-        for tmpl in probe_templates:
-            candidate_url = tmpl.format(h=h)
-            try:
-                probe_req = urllib.request.Request(candidate_url, headers={
-                    "User-Agent": USER_AGENT_DESKTOP,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-                })
-                with urllib.request.urlopen(probe_req, timeout=3.0) as probe_resp:
-                    if probe_resp.status == 200:
-                        site_meta = inspect_personal_site_metadata(candidate_url)
-                        if site_meta:
-                            if not site_metadata:
-                                site_metadata = site_meta
-                            discovered_personal_sites.append({
-                                "platform": "Portfolio",
-                                "url": candidate_url,
-                                "handle": h,
-                                "context": f"Verified Personal Web Portfolio ({h}) located via OSINT dork"
-                            })
-                            if candidate_url not in seen_urls:
-                                seen_urls.add(candidate_url)
-                                all_snippets.append({
-                                    "title": f"Verified Personal Web Portfolio ({h})",
-                                    "url": candidate_url,
-                                    "snippet": site_meta.get("bio") or f"Personal web presence deployed at {candidate_url}"
-                                    })
-            except Exception:
-                pass
 
-    # Execute targeted live dorks dynamically
+    def _probe_single_site(tmpl_str: str, h_str: str) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+        c_url = tmpl_str.format(h=h_str)
+        try:
+            p_req = urllib.request.Request(c_url, headers={
+                "User-Agent": USER_AGENT_DESKTOP,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            })
+            with urllib.request.urlopen(p_req, timeout=2.0) as p_resp:
+                if p_resp.status == 200:
+                    s_meta = inspect_personal_site_metadata(c_url)
+                    if s_meta:
+                        return (c_url, h_str, s_meta)
+        except Exception:
+            pass
+        return None
+
+    probe_tasks = [(tmpl, h) for h in candidate_handles[:4] for tmpl in probe_templates]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+        futs = [ex.submit(_probe_single_site, tmpl, h) for tmpl, h in probe_tasks]
+        for fut in concurrent.futures.as_completed(futs):
+            hit = fut.result()
+            if hit:
+                candidate_url, h, site_meta = hit
+                if not site_metadata:
+                    site_metadata = site_meta
+                discovered_personal_sites.append({
+                    "platform": "Portfolio",
+                    "url": candidate_url,
+                    "handle": h,
+                    "context": f"Verified Personal Web Portfolio ({h}) located via OSINT dork"
+                })
+                if candidate_url not in seen_urls:
+                    seen_urls.add(candidate_url)
+                    all_snippets.append({
+                        "title": f"Verified Personal Web Portfolio ({h})",
+                        "url": candidate_url,
+                        "snippet": site_meta.get("bio") or f"Personal web presence deployed at {candidate_url}"
+                    })
+
+    # Execute prioritized targeted live dorks concurrently
     queries = []
     if target_email and "@" in target_email:
         queries.append(f'"{target_email}"')
 
+    email_dom = target_email.split("@")[1].lower() if "@" in target_email else ""
+    is_freemail = any(d in email_dom for d in ["gmail", "yahoo", "outlook", "hotmail", "proton", "icloud", "zoho", "mail", "live", "aol", "yandex"])
+    org_stem = email_dom.split(".")[0].capitalize() if not is_freemail and "." in email_dom else None
+
+    # Retrieve AI-generated search dorks from identity decomposer
+    try:
+        from backend.identity_decomposer import decompose_target_identity
+        dec = decompose_target_identity(target_email, raw_name=target_name)
+        if dec:
+            if dec.get("organization") and not org_stem:
+                org_stem = dec["organization"]
+            for dk in dec.get("search_dorks", []):
+                if dk not in queries:
+                    queries.append(dk)
+    except Exception:
+        pass
+
+    # Execute prioritized targeted live dorks concurrently
+    prioritized_queries = []
     has_real_target_name = bool(target_name and target_name.lower() not in ["target user", "webmail target", "target"])
     if has_real_target_name:
-        queries.extend([
-            f"{target_name}",
-            f'"{target_name}"',
-            f"{target_name} twitter OR \"x.com\"",
-            f"{target_name} facebook",
-            f"{target_name} linkedin",
-            f"{target_name} github",
-            f"{target_name} instagram",
-            f"{target_name} portfolio OR website",
-            f"{target_name} company OR workplace OR employer",
-            f'"{target_name}" kvk OR vennoot OR partner OR director',
-        ])
-    if local_part and len(local_part) >= 4 and local_part != target_name.lower().replace(" ", ""):
-        if has_real_target_name:
-            queries.append(f'"{target_name}" "{local_part}"')
-        queries.append(f'"{local_part}"')
+        prioritized_queries.append(f'{target_name} linkedin')
+        if org_stem:
+            prioritized_queries.append(f'{target_name} {org_stem}')
+        prioritized_queries.append(f'"{target_name}"')
+        prioritized_queries.append(f'{target_name} security OR cyber')
+        prioritized_queries.append(f'{target_name} CTO OR manager OR director')
+
+    if target_email and "@" in target_email:
+        prioritized_queries.append(f'"{target_email}"')
 
     for q in queries:
-        snips = query_search_snippets(q, max_results=8)
-        for s in snips:
-            u = s.get("url")
-            if u and u not in seen_urls:
-                seen_urls.add(u)
-                all_snippets.append(s)
+        if q not in prioritized_queries:
+            prioritized_queries.append(q)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        futs = [ex.submit(query_search_snippets, q, 6) for q in prioritized_queries[:6]]
+        for fut in concurrent.futures.as_completed(futs):
+            try:
+                snips = fut.result()
+                for s in snips:
+                    u = s.get("url")
+                    if u and u not in seen_urls:
+                        seen_urls.add(u)
+                        all_snippets.append(s)
+            except Exception:
+                pass
 
     # Inspect personal portfolios or personal sites discovered from search snippets if not yet probed
     if not site_metadata:
@@ -989,19 +1122,19 @@ def execute_ai_dork_recon(
                 seen_urls.add(u)
                 all_snippets.append(s)
 
-    if not all_snippets:
-        if cache_key in _DORK_CACHE:
-            return _DORK_CACHE[cache_key]
-        return {"is_corroborated": False, "profiles": []}
-
-    # Run AI Disambiguation
-    ai_result = disambiguate_with_llm(target_name, target_email, all_snippets, handles)
     final_result = None
+    if all_snippets:
+        # Run AI Disambiguation
+        ai_result = disambiguate_with_llm(target_name, target_email, all_snippets, handles)
+        if ai_result and ai_result.get("is_corroborated"):
+            final_result = ai_result
+        else:
+            final_result = heuristic_fallback_disambiguation(target_name, target_email, all_snippets, handles)
+    elif cache_key in _DORK_CACHE:
+        return _DORK_CACHE[cache_key]
 
-    if ai_result and ai_result.get("is_corroborated"):
-        final_result = ai_result
-    else:
-        final_result = heuristic_fallback_disambiguation(target_name, target_email, all_snippets, handles)
+    if not final_result:
+        final_result = {"is_corroborated": False, "profiles": []}
 
     # Post-process with inspected site metadata if available
     if final_result and site_metadata:
@@ -1059,11 +1192,145 @@ def execute_ai_dork_recon(
             if not any(p.get("url") == ps["url"] for p in final_result.get("profiles", [])):
                 final_result.setdefault("profiles", []).append(ps)
 
-    # Check search snippets for strictly verified Facebook and Twitter/X profiles
+    # Corporate identity and LinkedIn anti-scraping barrier handling (Zero-Auth Mode)
+    # If the target belongs to a corporate domain (e.g. vooruit.nl -> Vooruit), enrich workplace
+    # via live impressum/website crawling and synthesize candidate LinkedIn profiles (e.g. /in/alje/)
+    # to bypass LinkedIn HTTP 999 anti-scraping blocks and present direct verified investigator links.
+    if final_result and org_stem:
+        final_result["is_corroborated"] = True
+
+        # 1. Passive Domain & Chamber of Commerce Impressum Probing
+        company_details = {}
+        try:
+            from backend.corporate_recon import inspect_company_web_registry
+            company_web = f"https://{email_dom}"
+            reg_info = inspect_company_web_registry(company_web)
+            if reg_info:
+                company_details.update(reg_info)
+
+            # Probe homepage for title, meta description and company social presence
+            req_c = urllib.request.Request(company_web, headers={"User-Agent": USER_AGENT_DESKTOP})
+            with urllib.request.urlopen(req_c, timeout=3.0) as resp_c:
+                c_html = resp_c.read().decode("utf-8", errors="ignore")
+                t_m = re.search(r'<title>(.*?)</title>', c_html, re.IGNORECASE)
+                if t_m:
+                    company_details["page_title"] = t_m.group(1).split("-")[0].strip()
+                # Find company LinkedIn page (handling JSON-LD escaped slashes)
+                unescaped_html = c_html.replace(r'\/', '/')
+                li_comp_m = re.search(r'https?://(?:www\.)?linkedin\.com/company/[a-zA-Z0-9_\-]+', unescaped_html)
+                if li_comp_m:
+                    company_details["company_linkedin"] = li_comp_m.group(0)
+        except Exception:
+            pass
+
+        corp_ctx_tokens = [f"Corporate organization associated with domain @{email_dom}"]
+        kvk_num = company_details.get("kvk_number")
+        addr_cand = company_details.get("address_candidate")
+        comp_li = company_details.get("company_linkedin")
+        page_t = company_details.get("page_title")
+
+        if kvk_num:
+            corp_ctx_tokens.append(f"Chamber of Commerce (KvK): {kvk_num}")
+        if addr_cand:
+            corp_ctx_tokens.append(f"Registered Office: {addr_cand}")
+        if comp_li:
+            corp_ctx_tokens.append(f"Corporate LinkedIn: {comp_li}")
+
+        comp_name = f"{org_stem} ({page_t})" if page_t and len(page_t) < 30 and page_t.lower() != org_stem.lower() else org_stem
+
+        if not final_result.get("workplace") or not final_result["workplace"].get("company"):
+            final_result["workplace"] = {
+                "company": comp_name,
+                "job_title": f"Corporate Specialist / IT Professional ({org_stem})" if "it" in (page_t or "").lower() or email_dom.endswith(".nl") else "Professional Role",
+                "context": " • ".join(corp_ctx_tokens),
+                "kvk_number": kvk_num,
+                "address": addr_cand,
+                "company_linkedin": comp_li
+            }
+
+        # If registered company address discovered, corroborate physical footprint
+        if addr_cand and not final_result.get("location"):
+            final_result["location"] = {
+                "city": addr_cand,
+                "country": "Netherlands" if email_dom.endswith(".nl") else "International",
+                "context": f"Corporate registered headquarters for {org_stem} (@{email_dom})"
+            }
+
+        has_li = any(p.get("platform") == "LinkedIn" for p in final_result.get("profiles", []))
+        if not has_li:
+            try:
+                from backend.linkedin_recon import (
+                    derive_linkedin_candidate_slugs,
+                    generate_linkedin_search_url
+                )
+                slugs = derive_linkedin_candidate_slugs(target_name, target_email)
+                if slugs:
+                    primary_slug = slugs[0]
+                    cand_url = f"https://www.linkedin.com/in/{primary_slug}/"
+                    search_url = generate_linkedin_search_url(target_name, org_stem)
+                    cand_list = [f"https://www.linkedin.com/in/{s}/" for s in slugs]
+                    cand_str = " | ".join(cand_list[:4])
+                    final_result.setdefault("profiles", []).append({
+                        "platform": "LinkedIn",
+                        "url": cand_url,
+                        "handle": primary_slug,
+                        "name": target_name,
+                        "job_title": final_result.get("workplace", {}).get("job_title") or f"Professional Role ({org_stem})",
+                        "company": comp_name,
+                        "context": f"Candidate LinkedIn Profile (@{primary_slug}) • Affiliated with {org_stem} (@{email_dom}) • Direct Member Search Pivot [SEARCH_URL: {search_url}] [CANDIDATES: {cand_str}] [STATUS: PROBABILITY_CANDIDATE]",
+                        "is_verified": False,
+                        "is_suspected": True,
+                        "confidence": 0.75,
+                        "search_url": search_url,
+                        "candidate_urls": cand_list
+                    })
+            except Exception as e:
+                print(f"[!] LinkedIn candidate derivation error: {e}")
+
+
+    # Check search snippets for strictly verified LinkedIn, Facebook and Twitter/X profiles
     if final_result:
         for s in all_snippets:
             u = s.get("url", "")
-            if "facebook.com/" in u.lower():
+            s_text = f"{s.get('title', '')} {s.get('snippet', '')}".lower()
+            if "linkedin.com/in/" in u.lower():
+                li_match = re.search(r'https?://(?:[a-z]{2}\.)?linkedin\.com/in/([a-zA-Z0-9_-]+)/?', u, re.IGNORECASE)
+                if li_match:
+                    li_slug = li_match.group(1).lower()
+                    if li_slug not in ["login", "signup", "help", "pulse", "jobs"]:
+                        t_parts = [p.lower() for p in target_name.split() if len(p) >= 3]
+                        first_n = t_parts[0] if t_parts else ""
+                        last_n = t_parts[-1] if len(t_parts) >= 2 else ""
+                        
+                        has_name_match = False
+                        if last_n:
+                            # Require both first name and surname match to eliminate wrong-person collisions
+                            has_first = first_n in s_text or first_n in li_slug
+                            has_last = last_n in s_text or last_n in li_slug
+                            has_name_match = has_first and has_last
+                        elif first_n:
+                            has_name_match = (first_n in li_slug) or (first_n in s_text)
+                        if has_name_match:
+                            clean_li_url = f"https://www.linkedin.com/in/{li_slug}/"
+                            from backend.linkedin_recon import generate_linkedin_search_url
+                            search_url = generate_linkedin_search_url(target_name, org_stem)
+                            li_prof = {
+                                "platform": "LinkedIn",
+                                "url": clean_li_url,
+                                "handle": li_slug,
+                                "name": target_name,
+                                "job_title": f"Professional Role ({org_stem})" if org_stem else "Professional Role",
+                                "company": org_stem or "",
+                                "context": f"Verified LinkedIn Profile discovered via OSINT web index (@{li_slug}) • Affiliated with {org_stem or 'Corporate Identity'} [SEARCH_URL: {search_url}] [STATUS: VERIFIED]",
+                                "is_verified": True,
+                                "is_suspected": False,
+                                "confidence": 0.95,
+                                "search_url": search_url
+                            }
+                            # Remove candidate or duplicate if present
+                            final_result["profiles"] = [p for p in final_result.get("profiles", []) if p.get("platform") != "LinkedIn"]
+                            final_result["profiles"].append(li_prof)
+            elif "facebook.com/" in u.lower():
                 v_fb = extract_valid_facebook_profile(
                     url=u,
                     title=s.get("title", ""),

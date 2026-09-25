@@ -11,6 +11,10 @@ __pycache__/
 
 # Data & DB (keep template/seed, ignore local db if customized)
 *.log
+data/browser_profile/
+data/browser_session/
+data/session.json
+scratch/
 
 # OS generated
 .DS_Store

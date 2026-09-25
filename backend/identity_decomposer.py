@@ -46,12 +46,13 @@ def decompose_target_identity(
         try:
             prompt = f"""Analyze the target email: '{clean_email}' (local_part: '{local_part}', domain: '{domain}', raw_name: '{raw_name or ""}').
 Determine:
-1. Is this a real person's legal name or an online pseudonym/handle/alias? (e.g. 'sjoerdsikkema79' -> real name 'Sjoerd Sikkema', 'xmister795' -> pseudonym/alias 'Xmister', 'shadowwolf99' -> pseudonym 'Shadowwolf').
+1. Is this a real person's legal name or an online pseudonym/handle/alias? (e.g. 'jordanvance88' -> real name 'Jordan Vance', 'shadowwolf99' -> pseudonym/alias 'Shadowwolf').
 2. If real name, split into first_name, middle_name (if any), and last_name with proper capitalization.
-3. If pseudonym/alias, set is_pseudonym=true, full_name to the clean title-cased handle (e.g. 'Xmister' or 'Xmister 795'), first_name to null, last_name to null, and primary_handle to the root stem (e.g. 'xmister').
-4. Probable country and language of origin based on onomastic/linguistic origin (e.g. Sjoerd Sikkema -> Netherlands, Dutch; Niewiadomski -> Poland, Polish). If unknown or pseudonym, set to null.
-5. If a real human name is identified, generate 4-7 natural username permutations (e.g. jandevries, jan.devries, jdevries). If it is a pseudonym or opaque string (e.g. 3gbxdd), DO NOT chop, slice, or shorten it into short 2-3 letter acronyms (e.g. NEVER produce '3gb' or 'gbx' as this causes severe vanity collisions). Keep the exact handle intact.
-6. Generate 3-5 high-yield search dork query strings tailored to their language/region.
+3. If pseudonym/alias, set is_pseudonym=true, full_name to the clean title-cased handle, first_name to null, last_name to null, and primary_handle to root stem.
+4. Probable country and language of origin based on onomastic/linguistic origin (e.g. Woltjer -> Netherlands, Dutch; Dupont -> France, French; Kowalski -> Poland, Polish).
+5. If domain is a company/workplace (e.g. 'vooruit.nl' -> 'Vooruit', 'cybercorp.io' -> 'Cybercorp'), extract organization name; if generic webmail (gmail/yahoo/outlook/proton), set to null.
+6. Generate 6-8 natural username permutations. IMPORTANT: If a real human name is identified, ALWAYS include standalone first_name (e.g. 'alje') and standalone last_name (e.g. 'woltjer') as candidate handles for early-adopter social/vanity matching.
+7. Generate 3-5 high-yield search dorks, including professional LinkedIn and corporate queries (e.g. 'site:linkedin.com/in "Alje Woltjer"', 'site:linkedin.com/in "Alje" "Vooruit"').
 
 Return ONLY a valid JSON object matching this schema:
 {{
@@ -60,19 +61,20 @@ Return ONLY a valid JSON object matching this schema:
   "middle_name": str or null,
   "last_name": str or null,
   "full_name": str,
+  "organization": str or null,
   "country_hint": str or null,
   "language_hint": str or null,
   "primary_handle": str,
   "candidate_usernames": [str],
   "search_dorks": [str]
 }}"""
-            sys_instruct = "You are an expert OSINT intelligence analyst and onomastics specialist. Return strictly valid JSON."
+            sys_instruct = "You are an expert OSINT intelligence analyst and corporate onomastics specialist. Return strictly valid JSON."
             res = call_groq_api(
                 prompt=prompt,
                 system_instruction=sys_instruct,
                 api_key=api_key,
                 response_json=True,
-                max_tokens=250
+                max_tokens=350
             )
             if res and res.get("success") and res.get("text"):
                 parsed = json.loads(res["text"])
@@ -83,10 +85,11 @@ Return ONLY a valid JSON object matching this schema:
                         "middle_name": parsed.get("middle_name"),
                         "last_name": parsed.get("last_name"),
                         "full_name": parsed.get("full_name").strip(),
+                        "organization": parsed.get("organization"),
                         "country_hint": parsed.get("country_hint"),
                         "language_hint": parsed.get("language_hint"),
                         "primary_handle": parsed.get("primary_handle") or local_part,
-                        "candidate_usernames": [u.strip().lower() for u in parsed.get("candidate_usernames", []) if u and not re.search(r'\d{2,}$', u)][:6],
+                        "candidate_usernames": [u.strip().lower() for u in parsed.get("candidate_usernames", []) if u and not re.search(r'\d{2,}$', u)],
                         "search_dorks": [d.strip() for d in parsed.get("search_dorks", []) if d]
                     }
                     _DECOMPOSER_CACHE[cache_key] = result
@@ -162,7 +165,9 @@ def _heuristic_decomposition(local: str, raw_name: Optional[str], domain: str) -
             f"{ln_l}.{fn_l}",
             f"{fn_l[0]}{ln_l}",
             f"{fn_l[0]}.{ln_l}",
-            f"{ln_l}{fn_l[0]}"
+            f"{ln_l}{fn_l[0]}",
+            fn_l,
+            ln_l
         ])
 
     cand_usernames.append(local)
@@ -181,17 +186,27 @@ def _heuristic_decomposition(local: str, raw_name: Optional[str], domain: str) -
     elif domain.endswith(".uk"):
         country_hint = "United Kingdom"
 
+    is_freemail = any(d in domain.lower() for d in ["gmail", "yahoo", "outlook", "hotmail", "proton", "icloud", "zoho", "mail", "live", "aol", "yandex"])
+    org_hint = domain.split(".")[0].capitalize() if not is_freemail and "." in domain else None
+
+    dorks = [f'"{full}"', f'"{full}" linkedin', f'"{full}" facebook']
+    if org_hint and fn:
+        dorks.append(f'"{full}" "{org_hint}"')
+        dorks.append(f'site:linkedin.com/in "{full}" OR "{fn}" "{org_hint}"')
+        dorks.append(f'site:linkedin.com/in/{fn.lower()}')
+
     return {
         "is_pseudonym": is_pseudo,
         "first_name": fn,
         "middle_name": None,
         "last_name": ln,
         "full_name": full,
+        "organization": org_hint,
         "country_hint": country_hint,
-        "language_hint": "English",
+        "language_hint": "Dutch" if country_hint == "Netherlands" else ("Polish" if country_hint == "Poland" else "English"),
         "primary_handle": clean_stem,
         "candidate_usernames": cand_usernames,
-        "search_dorks": [f'"{full}"', f"{full} linkedin", f"{full} facebook"]
+        "search_dorks": dorks
     }
 
 def _build_fallback_result(name: str, handle: str, is_pseudo: bool) -> Dict[str, Any]:

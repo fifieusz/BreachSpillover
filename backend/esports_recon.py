@@ -59,13 +59,12 @@ def query_esports_earnings(
     last_name = name_parts[-1] if len(name_parts) >= 2 else ""
 
     queries_to_try: List[str] = []
-    if clean_name and len(clean_name) >= 3:
+    if clean_name and len(clean_name) >= 4 and len(clean_name.split()) >= 2:
         queries_to_try.append(clean_name)
-    if first_name and len(first_name) >= 3 and first_name != clean_name.lower():
-        queries_to_try.append(first_name)
     for h in (known_handles or [])[:3]:
         h_clean = h.strip()
-        if h_clean and len(h_clean) >= 3 and h_clean.lower() not in [q.lower() for q in queries_to_try]:
+        # Avoid querying short generic given names or single words as gamertags
+        if h_clean and len(h_clean) >= 4 and h_clean.lower() not in [q.lower() for q in queries_to_try]:
             queries_to_try.append(h_clean)
 
     headers = {
@@ -107,22 +106,34 @@ def query_esports_earnings(
                 h_low = handle.lower()
 
                 matches_target = False
+                confidence = 0.50
 
-                # 1. Handle matches known handles
-                if any(h_low == (kh or "").lower().strip() for kh in (known_handles or [])):
-                    matches_target = True
-                # 2. Both first and last name match or initial match (e.g. "Yasir K" matches "Yasir Kadhim")
-                elif first_name and last_name:
-                    if first_name in rn_low:
-                        if last_name in rn_low:
+                # 1. Full name match or initial match (e.g. "Jordan V" matches "Jordan Vance")
+                if first_name and last_name:
+                    if first_name in rn_low and last_name in rn_low:
+                        matches_target = True
+                        confidence = 0.95
+                    elif first_name in rn_low and len(rn_parts) > 1:
+                        last_seg = rn_parts[-1].rstrip(".")
+                        if last_seg and last_name.startswith(last_seg):
                             matches_target = True
-                        elif len(rn_parts) > 1:
-                            last_seg = rn_parts[-1].rstrip(".")
-                            if last_seg and last_name.startswith(last_seg):
-                                matches_target = True
-                # 3. Exact full name match
+                            confidence = 0.90
                 elif clean_name.lower() == rn_low or rn_low in clean_name.lower():
                     matches_target = True
+                    confidence = 0.95
+
+                # 2. Distinctive Handle Match with Country Alignment
+                if not matches_target and any(h_low == (kh or "").lower().strip() for kh in (known_handles or [])):
+                    if len(handle) >= 5 and first_name not in [h_low, handle]:
+                        if target_country and row_country:
+                            t_c = target_country.lower()
+                            r_c = row_country.lower()
+                            if t_c in r_c or r_c in t_c:
+                                matches_target = True
+                                confidence = 0.88
+                        else:
+                            matches_target = True
+                            confidence = 0.70
 
                 if not matches_target:
                     continue
@@ -148,7 +159,7 @@ def query_esports_earnings(
                     "earnings": profile_details.get("earnings") or row_prize,
                     "country": profile_details.get("country") or row_country or target_country or "International",
                     "social_links": profile_details.get("social_links", []),
-                    "confidence_score": 0.95
+                    "confidence_score": confidence
                 })
         except Exception:
             pass

@@ -1,51 +1,44 @@
-import sys
-import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-import urllib.request
-import urllib.parse
-import re
-import base64
+import urllib.request, re, urllib.parse, base64
 
-def check_query(q):
-    url = 'https://www.bing.com/search?q=' + urllib.parse.quote(q)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-    }
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        html = resp.read().decode('utf-8', errors='ignore')
-
+def search_bing(query):
+    url = "https://www.bing.com/search?q=" + urllib.parse.quote(query)
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        html = r.read().decode('utf-8', errors='ignore')
     blocks = re.findall(r'<li class="b_algo"[^>]*>([\s\S]*?)</li>', html)
-    print(f"\n=== Query: {q} (Blocks: {len(blocks)}) ===")
-    for i, b in enumerate(blocks[:6]):
+    results = []
+    for b in blocks:
         h2 = re.search(r'<h2[^>]*>([\s\S]*?)</h2>', b)
-        h2_text = re.sub(r'<[^>]+>', '', h2.group(1)) if h2 else 'NO H2'
-        p = re.search(r'<p[^>]*>([\s\S]*?)</p>', b)
-        p_text = re.sub(r'<[^>]+>', '', p.group(1)) if p else ''
-        a_href = re.search(r'href="([^"]+)"', b)
-        url_dest = ""
-        if a_href:
-            clean_href = a_href.group(1).replace('&amp;', '&')
-            if 'bing.com/ck/a' in clean_href:
-                qs = urllib.parse.parse_qs(urllib.parse.urlparse(clean_href).query)
-                u = qs.get('u', [''])[0]
-                if u.startswith('a1'):
-                    b64 = u[2:] + '=' * ((4 - len(u[2:]) % 4) % 4)
-                    try:
-                        url_dest = base64.urlsafe_b64decode(b64).decode('utf-8', errors='ignore')
-                    except:
-                        url_dest = clean_href
-            else:
-                url_dest = clean_href
-        print(f"[{i+1}] {h2_text}")
-        print(f"    URL: {url_dest}")
-        print(f"    Snip: {p_text[:120]}")
+        if not h2: continue
+        a_m = re.search(r'<a\s+[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>', h2.group(1))
+        if not a_m: continue
+        raw_href = a_m.group(1).replace('&amp;', '&')
+        title = re.sub(r'<[^>]+>', '', a_m.group(2)).strip()
+        target_url = None
+        if raw_href.startswith('http') and 'bing.com' not in raw_href:
+            target_url = raw_href
+        elif 'bing.com/ck/a' in raw_href:
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_href).query)
+            u_param = qs.get('u', [''])[0]
+            if u_param.startswith('a1'):
+                b64 = u_param[2:]
+                b64 += '=' * ((4 - len(b64) % 4) % 4)
+                try:
+                    dec = base64.urlsafe_b64decode(b64).decode('utf-8', errors='ignore')
+                    if dec.startswith('http') and 'bing.com' not in dec:
+                        target_url = dec
+                except: pass
+        if target_url:
+            snip_m = re.search(r'<p[^>]*>([\s\S]*?)</p>', b) or re.search(r'<div class="b_caption"[^>]*>([\s\S]*?)</div>', b)
+            snip = re.sub(r'<[^>]+>', ' ', snip_m.group(1)).strip() if snip_m else ""
+            results.append({'url': target_url, 'title': title, 'snippet': snip})
+    return results
 
-check_query('"Yasir Kadhim"')
-check_query('Yasir Ashraf Kadhim')
-check_query('Yasir Kadhim Rotterdam')
-check_query('Yasir Kadhim Netherlands')
-check_query('Yasir Kadhim Bergschenhoek')
-check_query('Yasir Kadhim "JY Collective"')
-check_query('Yasir1kadhim')
+for q in ['"Jordin Zwaan"', 'Jordin Zwaan linkedin', 'jordinzwaan2016', 'jordinzwaan']:
+    res = search_bing(q)
+    print(f"=== Query: {q} ({len(res)} results) ===")
+    for r in res[:4]:
+        print("  URL:", r['url'])
+        print("  Title:", r['title'])
+        print("  Snippet:", r['snippet'][:120])
+    print()

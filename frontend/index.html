@@ -1,24 +1,33 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BreachSpillover — Production Security Intelligence & Exposure Ledger</title>
-    <meta name="description" content="Local OSINT Digital Risk Protection tool tracing compromised credentials, infostealer malware dumps, physical footprints, and household attack chains.">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%230E1117%22/><text y=%22.75em%22 x=%2250%25%22 font-size=%2260%22 text-anchor=%22middle%22 fill=%22%23EF4444%22 font-family=%22monospace%22 font-weight=%22bold%22>BS</text></svg>">
-    
+    <meta name="description"
+        content="Local OSINT Digital Risk Protection tool tracing compromised credentials, infostealer malware dumps, physical footprints, and household attack chains.">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%230E1117%22/><text y=%22.75em%22 x=%2250%25%22 font-size=%2260%22 text-anchor=%22middle%22 fill=%22%23EF4444%22 font-family=%22monospace%22 font-weight=%22bold%22>BS</text></svg>">
+
     <!-- Precision Typography Stack: Geist Sans, Plus Jakarta Sans, Space Grotesk, JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-    
+    <link
+        href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+        rel="stylesheet">
+
     <!-- Leaflet.js for Geospatial Threat Mapping -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
     <!-- html2pdf for Executive Reports -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
+        integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
     <!-- Tailwind CSS Script for Zero-Build Utility Support -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -61,7 +70,7 @@
 
     <!-- Anti-FOUC Early Theme Resolution -->
     <script>
-        (function() {
+        (function () {
             try {
                 const stored = localStorage.getItem('breachspillover_theme');
                 if (stored === 'light' || (!stored && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)) {
@@ -73,7 +82,7 @@
                     document.documentElement.classList.remove('light');
                     document.documentElement.setAttribute('data-theme', 'dark');
                 }
-            } catch(e) {}
+            } catch (e) { }
         })();
     </script>
 
@@ -81,9 +90,11 @@
     <script src="/static/js/vendor/vis-network.min.js"></script>
 
     <!-- Application CSS -->
-    <link rel="stylesheet" href="/static/css/style.css?v=8.0">
+    <link rel="stylesheet" href="/static/css/style.css?v=20260925_cookie_vault_v2">
 </head>
-<body class="font-sans min-h-screen selection:bg-blue-100 selection:text-blue-900 dark:selection:bg-zinc-800 dark:selection:text-white">
+
+<body
+    class="font-sans min-h-screen selection:bg-blue-100 selection:text-blue-900 dark:selection:bg-zinc-800 dark:selection:text-white">
 
     <!-- Top Navigation Bar (Instrument Status Bar) -->
     <header class="app-header">
@@ -95,20 +106,32 @@
             <div class="header-actions">
 
 
-                <!-- AI Engine Configuration Control -->
-                <div class="ai-header-control" title="Configure Cloud LLM Threat Model (Groq Llama 3.3 / Gemini)">
-                    <button type="button" id="btn-ai-settings" class="btn-declassify-badge" onclick="openAISettingsModal()">
-                        <span id="ai-status-icon" class="status-btn-icon"></span>
-                        <span id="ai-status-text">AI: READY</span>
+                <!-- Dedicated Desktop Browser Login Button (Primary Session Authentication) -->
+                <div class="browser-header-control" title="Connect Local Desktop Browser Session for LinkedIn Intelligence">
+                    <button type="button" id="btn-header-connect-browser" class="btn-cookie-vault"
+                        onclick="window.connectDesktopBrowser()" style="cursor: pointer; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; background: rgba(56, 189, 248, 0.08); display: flex; align-items: center; gap: 0.5rem;"
+                        aria-label="Connect Browser">
+                        <span id="browser-status-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #38bdf8; display: inline-block;"></span>
+                        <div class="cookie-icon-wrapper" style="display: flex; align-items: center;">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="2" y1="12" x2="22" y2="12"></line>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                            </svg>
+                        </div>
+                        <span id="browser-btn-text" class="cookie-btn-label mono" style="font-weight: 600;">CONNECT BROWSER</span>
                     </button>
                 </div>
 
 
+
                 <!-- Retro 8-Bit Pokémon SFX Toggle -->
                 <div class="sfx-header-control" title="Toggle Sound Effects & Audio Cues">
-                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge active" onclick="window.toggleSoundEffects()">
+                    <button type="button" id="btn-sfx-toggle" class="btn-declassify-badge active"
+                        onclick="window.toggleSoundEffects()">
                         <span id="sfx-toggle-icon" class="sfx-icon inline-flex items-center">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                                 <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
                                 <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
@@ -120,9 +143,11 @@
 
                 <!-- Theme Mode Toggle Control (Dark / Light) -->
                 <div class="theme-header-control" title="Toggle Light / Dark Mode">
-                    <button type="button" id="btn-theme-toggle" class="btn-declassify-badge theme-toggle-btn" onclick="toggleTheme()">
+                    <button type="button" id="btn-theme-toggle" class="btn-declassify-badge theme-toggle-btn"
+                        onclick="toggleTheme()">
                         <span id="theme-toggle-icon" class="theme-icon">
-                            <svg class="theme-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <svg class="theme-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="5"></circle>
                                 <line x1="12" y1="1" x2="12" y2="3"></line>
                                 <line x1="12" y1="21" x2="12" y2="23"></line>
@@ -144,6 +169,7 @@
     <!-- Main Workspace Container -->
     <main class="main-content">
 
+
         <!-- Tactical Search & Investigation Cockpit -->
         <section class="search-cockpit">
             <!-- Scanline Animation (Active during query) -->
@@ -152,21 +178,17 @@
             <div class="search-cockpit-header">
                 <div class="search-title-group">
                     <h1 class="tracking-tight">Target Investigation Cockpit</h1>
-                    <p>Execute multi-source correlation across live darknet indices, infostealers, and verified breach disclosures.</p>
+                    <p>Execute multi-source correlation across live darknet indices, infostealers, and verified breach
+                        disclosures.</p>
                 </div>
             </div>
 
             <form id="search-form" class="search-form-row" onsubmit="event.preventDefault(); triggerSearch();">
                 <div class="search-input-shell">
                     <span class="search-prompt-prefix mono">query:// &gt;</span>
-                    <input 
-                        type="text" 
-                        id="search-input" 
-                        class="search-input" 
-                        placeholder="target@company.com, company.com, +14155550192, or credential hash..." 
-                        autocomplete="off" 
-                        spellcheck="false"
-                    >
+                    <input type="text" id="search-input" class="search-input"
+                        placeholder="target@company.com, company.com, +14155550192, or credential hash..."
+                        autocomplete="off" spellcheck="false">
                     <div class="search-indicators">
                         <span id="search-type-badge" class="search-type-badge font-mono">[STANDBY: AUTO-DETECT]</span>
                         <span class="search-kbd-hint font-mono">Ctrl+K</span>
@@ -186,11 +208,13 @@
                 </div>
                 <div class="cockpit-anchor-field">
                     <label for="anchor-username" class="cockpit-anchor-label mono">HANDLE / USERNAME (OPTIONAL):</label>
-                    <input type="text" id="anchor-username" class="cockpit-anchor-input mono" placeholder="Known Handle">
+                    <input type="text" id="anchor-username" class="cockpit-anchor-input mono"
+                        placeholder="Known Handle">
                 </div>
                 <div class="cockpit-anchor-field">
                     <label for="anchor-phone" class="cockpit-anchor-label mono">PHONE NUMBER (OPTIONAL):</label>
-                    <input type="text" id="anchor-phone" class="cockpit-anchor-input mono" placeholder="Known Phone Line">
+                    <input type="text" id="anchor-phone" class="cockpit-anchor-input mono"
+                        placeholder="Known Phone Line">
                 </div>
                 <div class="cockpit-anchor-field">
                     <label for="anchor-city" class="cockpit-anchor-label mono">LOCATION (OPTIONAL):</label>
@@ -228,7 +252,8 @@
                 </div>
                 <div id="recon-log-stream" class="recon-log-stream mono"></div>
                 <div class="recon-terminal-footer mono">
-                    <span class="recon-progress-text" id="recon-progress-text">Phase 1/6: Querying Global Breach Indices...</span>
+                    <span class="recon-progress-text" id="recon-progress-text">Phase 1/6: Querying Global Breach
+                        Indices...</span>
                     <div class="recon-progress-bar-bg">
                         <div id="recon-progress-bar" class="recon-progress-bar-fill" style="width: 15%;"></div>
                     </div>
@@ -244,7 +269,10 @@
                         <span class="badge-pill badge-clean">ENGINE ONLINE</span>
                     </div>
                     <p class="alert-desc">
-                        Enter any personal or corporate email address, domain, phone, or credential hash above, or load <button type="button" class="btn-text-link mono" onclick="loadExampleTarget('test@gmail.com')">test@gmail.com</button> to inspect a live verified threat dossier.
+                        Enter any personal or corporate email address, domain, phone, or credential hash above, or load
+                        <button type="button" class="btn-text-link mono"
+                            onclick="loadExampleTarget('test@gmail.com')">test@gmail.com</button> to inspect a live
+                        verified threat dossier.
                     </p>
                 </div>
             </div>
@@ -258,7 +286,8 @@
                         <span class="badge-pill badge-critical" id="domain-warning-badge">NO_MX_RECORDS</span>
                     </div>
                     <p class="alert-desc" id="domain-warning-desc">
-                        This domain has no active MX (Mail Exchange) records. This email cannot receive messages or exist on public mail exchangers.
+                        This domain has no active MX (Mail Exchange) records. This email cannot receive messages or
+                        exist on public mail exchangers.
                     </p>
                 </div>
             </div>
@@ -269,15 +298,20 @@
                     <div class="flex items-center gap-3">
                         <span class="alert-icon-tag tag-clean">[STATUS: UNCOMPROMISED]</span>
                         <div>
-                            <h3 class="font-display font-bold text-base tracking-tight text-slate-900 dark:text-white">Zero Compromise Footprints Detected</h3>
-                            <div class="font-mono text-xs text-emerald-400 mt-0.5">SPILLOVER RISK SCORE: 0 / 100 // VERIFIED CLEARANCE</div>
+                            <h3 class="font-display font-bold text-base tracking-tight text-slate-900 dark:text-white">
+                                Zero Compromise Footprints Detected</h3>
+                            <div class="font-mono text-xs text-emerald-400 mt-0.5">SPILLOVER RISK SCORE: 0 / 100 //
+                                VERIFIED CLEARANCE</div>
                         </div>
                     </div>
                     <span class="badge-pill badge-clean">AUTHENTICATED CLEAN</span>
                 </div>
 
                 <p class="alert-desc text-zinc-600 dark:text-zinc-300">
-                    Target identity <strong id="clean-email-label" class="mono text-slate-900 dark:text-white">this target</strong> does not appear in any known infostealer malware dumps, darknet combolists, or credential leaks across indexed threat intelligence repositories. No plaintext passwords, compromised residential addresses, or household attack vectors were detected.
+                    Target identity <strong id="clean-email-label" class="mono text-slate-900 dark:text-white">this
+                        target</strong> does not appear in any known infostealer malware dumps, darknet combolists, or
+                    credential leaks across indexed threat intelligence repositories. No plaintext passwords,
+                    compromised residential addresses, or household attack vectors were detected.
                 </p>
 
                 <!-- Affirmative Security Recommendations Grid -->
@@ -289,28 +323,32 @@
                                 <span class="text-emerald-400 font-mono font-bold text-xs">[OK]</span>
                                 <span>FIDO2 / WebAuthn MFA</span>
                             </div>
-                            <div class="rec-item-desc">Enforce hardware keys or TOTP authenticator apps. Prohibit SMS-based 2FA to prevent SIM-swap risks.</div>
+                            <div class="rec-item-desc">Enforce hardware keys or TOTP authenticator apps. Prohibit
+                                SMS-based 2FA to prevent SIM-swap risks.</div>
                         </div>
                         <div class="rec-item">
                             <div class="rec-item-title">
                                 <span class="text-emerald-400 font-mono font-bold text-xs">[OK]</span>
                                 <span>Credential Entropy Standard</span>
                             </div>
-                            <div class="rec-item-desc">Utilize password managers to generate unique 20+ character passwords across all services.</div>
+                            <div class="rec-item-desc">Utilize password managers to generate unique 20+ character
+                                passwords across all services.</div>
                         </div>
                         <div class="rec-item">
                             <div class="rec-item-title">
                                 <span class="text-emerald-400 font-mono font-bold text-xs">[OK]</span>
                                 <span>Darknet Telemetry Monitoring</span>
                             </div>
-                            <div class="rec-item-desc">Maintain continuous watch over darknet stealer marketplaces for prospective organizational exposures.</div>
+                            <div class="rec-item-desc">Maintain continuous watch over darknet stealer marketplaces for
+                                prospective organizational exposures.</div>
                         </div>
                         <div class="rec-item">
                             <div class="rec-item-title">
                                 <span class="text-emerald-400 font-mono font-bold text-xs">[OK]</span>
                                 <span>OAuth Token Hygiene</span>
                             </div>
-                            <div class="rec-item-desc">Regularly review and revoke stale third-party application consents linked to corporate identity providers.</div>
+                            <div class="rec-item-desc">Regularly review and revoke stale third-party application
+                                consents linked to corporate identity providers.</div>
                         </div>
                     </div>
                     <div class="clearance-audit-stamp">
@@ -357,19 +395,24 @@
                 </div>
 
                 <div class="summary-actions">
-                    <button type="button" id="btn-copy-report" class="btn-action-tool" onclick="copyInvestigationReport()" title="Copy Formatted Incident Summary">
+                    <button type="button" id="btn-copy-report" class="btn-action-tool"
+                        onclick="copyInvestigationReport()" title="Copy Formatted Incident Summary">
                         <span>Copy Report</span>
                     </button>
-                    <button type="button" id="btn-export-json" class="btn-action-tool" onclick="exportInvestigationJSON()" title="Export Raw Forensic JSON Payload">
+                    <button type="button" id="btn-export-json" class="btn-action-tool"
+                        onclick="exportInvestigationJSON()" title="Export Raw Forensic JSON Payload">
                         <span>Export JSON</span>
                     </button>
-                    <button type="button" id="btn-export-csv" class="btn-action-tool" onclick="exportInvestigationCSV()" title="Export Forensic CSV Ledger">
+                    <button type="button" id="btn-export-csv" class="btn-action-tool" onclick="exportInvestigationCSV()"
+                        title="Export Forensic CSV Ledger">
                         <span>Export CSV</span>
                     </button>
-                    <button type="button" id="btn-export-doc" class="btn-action-tool" onclick="exportInvestigationDOC()" title="Export Executive Word Dossier (.doc)">
+                    <button type="button" id="btn-export-doc" class="btn-action-tool" onclick="exportInvestigationDOC()"
+                        title="Export Executive Word Dossier (.doc)">
                         <span>Export DOC</span>
                     </button>
-                    <button type="button" id="btn-export-pdf" class="btn-action-tool" onclick="exportInvestigationPDF()" title="Generate Executive PDF Report">
+                    <button type="button" id="btn-export-pdf" class="btn-action-tool" onclick="exportInvestigationPDF()"
+                        title="Generate Executive PDF Report">
                         <span>Export PDF</span>
                     </button>
                     <span id="summary-action-tooltip" class="action-tooltip">Copied to clipboard</span>
@@ -378,7 +421,7 @@
 
             <!-- State 2: Active Target Bento Forensic Ledger (Shown when score > 0) -->
             <div id="target-exposure-card" class="bento-ledger-container" style="display: none;">
-                
+
                 <!-- Target Identity Header Row -->
                 <div class="bento-header-row">
                     <div class="bento-identity-cell">
@@ -386,7 +429,8 @@
                         <div class="identity-titles">
                             <div class="identity-headline">
                                 <h2 id="target-name" class="tracking-tight">—</h2>
-                                <span id="domain-status-badge" class="badge-pill badge-clean" style="display: none;">—</span>
+                                <span id="domain-status-badge" class="badge-pill badge-clean"
+                                    style="display: none;">—</span>
                             </div>
                             <div class="identity-subline mono">
                                 <span id="target-email-display">—</span>
@@ -397,22 +441,30 @@
                     <!-- Risk Word & Score Gauge (No Tiers) -->
                     <div class="score-index-cell">
                         <div class="score-number-display">
-                            <span id="score-number" class="score-big-val" style="font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em;">—</span>
+                            <span id="score-number" class="score-big-val"
+                                style="font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em;">—</span>
                         </div>
                         <div class="score-label-col">
                             <span id="score-level-label" class="score-tag-title">RISK EVALUATION</span>
-                            <span id="score-numeric-badge" class="mono text-[11px] text-zinc-400 font-bold tracking-wider">SCORE: —/100</span>
+                            <span id="score-numeric-badge"
+                                class="mono text-[11px] text-zinc-400 font-bold tracking-wider">SCORE: —/100</span>
                         </div>
                     </div>
                 </div>
 
                 <!-- Defensive Exposure Report Export (breach + public-account exposure only) -->
-                <div class="exposure-export-row" style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; padding:0.5rem 0 0.25rem;">
-                    <span class="mono text-[10px] text-zinc-500 uppercase tracking-wider">Defensive Exposure Report:</span>
-                    <button type="button" id="btn-exposure-json" class="btn-action-tool" onclick="exportExposureReport('json')" title="Export defensive exposure report (JSON): breach names/dates/categories and public account presence only. Excludes credentials, addresses, geolocation, phone, and relatives.">
+                <div class="exposure-export-row"
+                    style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; padding:0.5rem 0 0.25rem;">
+                    <span class="mono text-[10px] text-zinc-500 uppercase tracking-wider">Defensive Exposure
+                        Report:</span>
+                    <button type="button" id="btn-exposure-json" class="btn-action-tool"
+                        onclick="exportExposureReport('json')"
+                        title="Export defensive exposure report (JSON): breach names/dates/categories and public account presence only. Excludes credentials, addresses, geolocation, phone, and relatives.">
                         <span>Export JSON</span>
                     </button>
-                    <button type="button" id="btn-exposure-md" class="btn-action-tool" onclick="exportExposureReport('md')" title="Export defensive exposure report (Markdown): breach names/dates/categories and public account presence only. Excludes credentials, addresses, geolocation, phone, and relatives.">
+                    <button type="button" id="btn-exposure-md" class="btn-action-tool"
+                        onclick="exportExposureReport('md')"
+                        title="Export defensive exposure report (Markdown): breach names/dates/categories and public account presence only. Excludes credentials, addresses, geolocation, phone, and relatives.">
                         <span>Export Report (MD)</span>
                     </button>
                 </div>
@@ -420,7 +472,8 @@
                 <!-- 5-Pillar Multi-Item Bento Grid -->
                 <div id="results-findings-grid" class="findings-grid">
                     <!-- Pillar 1: Password & Hashes -->
-                    <div class="finding-card finding-card-clickable" id="card-creds" onclick="handleFindingCardClick('creds')" title="Click to inspect credential vault">
+                    <div class="finding-card finding-card-clickable" id="card-creds"
+                        onclick="handleFindingCardClick('creds')" title="Click to inspect credential vault">
                         <div class="finding-header">
                             <span class="finding-index-tag">[01 // CREDENTIALS]</span>
                             <span class="badge-lock" id="badge-lock-creds">—</span>
@@ -431,7 +484,8 @@
                     </div>
 
                     <!-- Pillar 2: Physical & Geographic Footprints -->
-                    <div class="finding-card finding-card-clickable" id="card-address" onclick="handleFindingCardClick('address')" title="Click to inspect geolocation coordinates">
+                    <div class="finding-card finding-card-clickable" id="card-address"
+                        onclick="handleFindingCardClick('address')" title="Click to inspect geolocation coordinates">
                         <div class="finding-header">
                             <span class="finding-index-tag">[02 // GEOLOCATION]</span>
                             <span class="badge-lock" id="badge-lock-address">—</span>
@@ -442,7 +496,8 @@
                     </div>
 
                     <!-- Pillar 3: Telecom & Phone Lines -->
-                    <div class="finding-card finding-card-clickable" id="card-phone" onclick="handleFindingCardClick('phone')" title="Click to inspect telecom lines">
+                    <div class="finding-card finding-card-clickable" id="card-phone"
+                        onclick="handleFindingCardClick('phone')" title="Click to inspect telecom lines">
                         <div class="finding-header">
                             <span class="finding-index-tag">[03 // TELECOM]</span>
                             <span class="badge-lock" id="badge-lock-phone">—</span>
@@ -453,7 +508,8 @@
                     </div>
 
                     <!-- Pillar 4: Household Cohabitants -->
-                    <div class="finding-card finding-card-clickable" id="card-relative" onclick="handleFindingCardClick('relative')" title="Click to inspect household cohabitants">
+                    <div class="finding-card finding-card-clickable" id="card-relative"
+                        onclick="handleFindingCardClick('relative')" title="Click to inspect household cohabitants">
                         <div class="finding-header">
                             <span class="finding-index-tag">[04 // HOUSEHOLD]</span>
                             <span class="badge-lock" id="badge-lock-relative">—</span>
@@ -464,7 +520,9 @@
                     </div>
 
                     <!-- Pillar 5: Workplace & Academic Career -->
-                    <div class="finding-card finding-card-clickable" id="card-workplace" onclick="handleFindingCardClick('workplace')" title="Click to inspect verified workplace and employment history">
+                    <div class="finding-card finding-card-clickable" id="card-workplace"
+                        onclick="handleFindingCardClick('workplace')"
+                        title="Click to inspect verified workplace and employment history">
                         <div class="finding-header">
                             <span class="finding-index-tag">[05 // WORKPLACE &amp; CAREER]</span>
                             <span class="badge-lock" id="badge-lock-workplace">—</span>
@@ -498,7 +556,8 @@
                                 <span id="val-stealers" class="vector-pts mono">CLEAN</span>
                             </div>
                             <div class="vector-track">
-                                <div id="bar-stealers" class="vector-fill" style="width: 0%; background: #10b981;"></div>
+                                <div id="bar-stealers" class="vector-fill" style="width: 0%; background: #10b981;">
+                                </div>
                             </div>
                             <div id="sub-stealers" class="vector-note mono">Awaiting target query</div>
                         </div>
@@ -534,7 +593,8 @@
                                 <span id="val-physical" class="vector-pts mono">CLEAN</span>
                             </div>
                             <div class="vector-track">
-                                <div id="bar-physical" class="vector-fill" style="width: 0%; background: #10b981;"></div>
+                                <div id="bar-physical" class="vector-fill" style="width: 0%; background: #10b981;">
+                                </div>
                             </div>
                             <div id="sub-physical" class="vector-note mono">Awaiting target query</div>
                         </div>
@@ -557,11 +617,13 @@
                 <section class="card-panel">
                     <div class="tabs-nav">
                         <button type="button" class="tab-btn active" data-tab="tab-pivots">[VERIFIED PIVOTS]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-suspected">[SUSPECTED CANDIDATES (<span id="count-suspected">0</span>)]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-suspected">[SUSPECTED CANDIDATES (<span
+                                id="count-suspected">0</span>)]</button>
                         <button type="button" class="tab-btn" data-tab="tab-leaks">[BREACH DISCLOSURES]</button>
                         <button type="button" class="tab-btn" data-tab="tab-creds">[CREDENTIAL VAULT]</button>
                         <button type="button" class="tab-btn" data-tab="tab-physical">[GEOLOCATION &amp; MAP]</button>
-                        <button type="button" class="tab-btn" data-tab="tab-timeline">[ATTACK CHAIN &amp; TIMELINE]</button>
+                        <button type="button" class="tab-btn" data-tab="tab-timeline">[ATTACK CHAIN &amp;
+                            TIMELINE]</button>
                     </div>
 
                     <div class="tabs-content">
@@ -587,8 +649,11 @@
 
                         <!-- 5. Geolocation & Physical Map -->
                         <div id="tab-physical" class="tab-pane">
-                            <div id="tab-physical-content" style="height: 100%; display: flex; flex-direction: column; gap: 10px;">
-                                <div id="map-container" style="height: 350px; width: 100%; border-radius: 8px; border: 1px solid var(--b-hairline); background: var(--c-canvas); position: relative;"></div>
+                            <div id="tab-physical-content"
+                                style="height: 100%; display: flex; flex-direction: column; gap: 10px;">
+                                <div id="map-container"
+                                    style="height: 350px; width: 100%; border-radius: 8px; border: 1px solid var(--b-hairline); background: var(--c-canvas); position: relative;">
+                                </div>
                                 <div id="tab-physical-list"></div>
                             </div>
                         </div>
@@ -609,19 +674,24 @@
             <!-- Right Column: Interactive Spillover Attack Chain Graph -->
             <div class="workspace-right">
                 <!-- Burner / Disposable Email Warning Banner -->
-                <div id="burner-email-alert" style="display: none; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; align-items: center; justify-content: space-between;">
+                <div id="burner-email-alert"
+                    style="display: none; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span class="mono text-amber-500 font-bold text-sm">[!]</span>
                         <div>
-                            <div class="mono text-xs font-bold text-amber-500 dark:text-amber-300 uppercase tracking-wide">Disposable / Burner Email Detected</div>
-                            <div id="burner-alert-text" class="text-xs text-amber-600 dark:text-amber-200 mt-0.5">Target belongs to an ephemeral burner provider. High evasion anomaly.</div>
+                            <div
+                                class="mono text-xs font-bold text-amber-500 dark:text-amber-300 uppercase tracking-wide">
+                                Disposable / Burner Email Detected</div>
+                            <div id="burner-alert-text" class="text-xs text-amber-600 dark:text-amber-200 mt-0.5">Target
+                                belongs to an ephemeral burner provider. High evasion anomaly.</div>
                         </div>
                     </div>
-                    <span class="mono text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-200 border border-amber-500/30 px-2 py-1 rounded">HIGH_EVASION</span>
+                    <span
+                        class="mono text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-200 border border-amber-500/30 px-2 py-1 rounded">HIGH_EVASION</span>
                 </div>
 
                 <section class="card-panel graph-panel">
-                    
+
                     <!-- Graph Controls Toolbar -->
                     <div class="panel-header">
                         <div class="graph-title-group">
@@ -639,16 +709,21 @@
                             <button type="button" id="btn-graph-zoomout" class="btn-tool" title="Zoom out">
                                 [-]
                             </button>
-                            <button type="button" id="btn-graph-tidy" class="btn-tool" title="De-clutter & organize into concentric orbits">
+                            <button type="button" id="btn-graph-tidy" class="btn-tool"
+                                title="De-clutter & organize into concentric orbits">
                                 [TIDY ORBITS]
                             </button>
-                            <button type="button" id="btn-graph-layout" class="btn-tool" title="Toggle flow view / organic layout">
+                            <button type="button" id="btn-graph-layout" class="btn-tool"
+                                title="Toggle flow view / organic layout">
                                 [TREE_VIEW]
                             </button>
-                            <button type="button" id="btn-graph-physics" class="btn-tool" title="Toggle physics simulation">
+                            <button type="button" id="btn-graph-physics" class="btn-tool"
+                                title="Toggle physics simulation">
                                 [PHYSICS: ON]
                             </button>
-                            <button type="button" id="btn-graph-fullscreen" class="btn-tool" title="Toggle Fullscreen Graph View (Esc to exit)" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
+                            <button type="button" id="btn-graph-fullscreen" class="btn-tool"
+                                title="Toggle Fullscreen Graph View (Esc to exit)"
+                                style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
                                 [FULLSCREEN]
                             </button>
                         </div>
@@ -658,25 +733,32 @@
                     <div class="graph-category-strip">
                         <span class="cat-strip-label mono">BRANCH:</span>
                         <div class="cat-strip-buttons">
-                            <button type="button" class="btn-cat-filter active" data-cat="all" onclick="filterGraphCategory('all')">
+                            <button type="button" class="btn-cat-filter active" data-cat="all"
+                                onclick="filterGraphCategory('all')">
                                 <span class="cat-dot" style="background: #38bdf8;"></span>[ALL]
                             </button>
-                            <button type="button" class="btn-cat-filter" data-cat="breaches" onclick="filterGraphCategory('breaches')">
+                            <button type="button" class="btn-cat-filter" data-cat="breaches"
+                                onclick="filterGraphCategory('breaches')">
                                 <span class="cat-dot" style="background: #f43f5e;"></span>[BREACHES]
                             </button>
-                            <button type="button" class="btn-cat-filter" data-cat="git" onclick="filterGraphCategory('git')">
+                            <button type="button" class="btn-cat-filter" data-cat="git"
+                                onclick="filterGraphCategory('git')">
                                 <span class="cat-dot" style="background: #38bdf8;"></span>[DEV &amp; GIT]
                             </button>
-                            <button type="button" class="btn-cat-filter" data-cat="accounts" onclick="filterGraphCategory('accounts')">
+                            <button type="button" class="btn-cat-filter" data-cat="accounts"
+                                onclick="filterGraphCategory('accounts')">
                                 <span class="cat-dot" style="background: #c084fc;"></span>[ACCOUNTS]
                             </button>
-                            <button type="button" class="btn-cat-filter" data-cat="telecom" onclick="filterGraphCategory('telecom')">
+                            <button type="button" class="btn-cat-filter" data-cat="telecom"
+                                onclick="filterGraphCategory('telecom')">
                                 <span class="cat-dot" style="background: #22d3ee;"></span>[TELECOM]
                             </button>
-                            <button type="button" class="btn-cat-filter" data-cat="geo" onclick="filterGraphCategory('geo')">
+                            <button type="button" class="btn-cat-filter" data-cat="geo"
+                                onclick="filterGraphCategory('geo')">
                                 <span class="cat-dot" style="background: #34d399;"></span>[LOCATIONS]
                             </button>
-                            <button type="button" class="btn-cat-filter" data-cat="semantic" onclick="filterGraphCategory('semantic')">
+                            <button type="button" class="btn-cat-filter" data-cat="semantic"
+                                onclick="filterGraphCategory('semantic')">
                                 <span class="cat-dot" style="background: #a855f7;"></span>[INTEL]
                             </button>
                         </div>
@@ -706,12 +788,18 @@
 
                     <!-- Graph Color Legend Strip -->
                     <div class="graph-legend-strip">
-                        <span class="legend-item"><span class="legend-dot" style="background: #38bdf8;"></span>Target</span>
-                        <span class="legend-item"><span class="legend-dot" style="background: #f43f5e;"></span>Exfiltrated Breaches</span>
-                        <span class="legend-item"><span class="legend-dot" style="background: #38bdf8;"></span>Git Repos</span>
-                        <span class="legend-item"><span class="legend-dot" style="background: #c084fc;"></span>Public Accounts</span>
-                        <span class="legend-item"><span class="legend-dot" style="background: #22d3ee;"></span>Telecom E.164</span>
-                        <span class="legend-item"><span class="legend-dot" style="background: #34d399;"></span>Geospatial Records</span>
+                        <span class="legend-item"><span class="legend-dot"
+                                style="background: #38bdf8;"></span>Target</span>
+                        <span class="legend-item"><span class="legend-dot"
+                                style="background: #f43f5e;"></span>Exfiltrated Breaches</span>
+                        <span class="legend-item"><span class="legend-dot" style="background: #38bdf8;"></span>Git
+                            Repos</span>
+                        <span class="legend-item"><span class="legend-dot" style="background: #c084fc;"></span>Public
+                            Accounts</span>
+                        <span class="legend-item"><span class="legend-dot" style="background: #22d3ee;"></span>Telecom
+                            E.164</span>
+                        <span class="legend-item"><span class="legend-dot"
+                                style="background: #34d399;"></span>Geospatial Records</span>
                     </div>
 
                 </section>
@@ -744,7 +832,8 @@
                             <span class="tool-launcher-btn mono">LAUNCH &rarr;</span>
                         </div>
                         <h4 class="tool-launcher-title">Ingest Combolist</h4>
-                        <p class="tool-launcher-desc">Ingest raw breach dumps, email:pass lists, and stealer archives directly into the local threat intelligence store.</p>
+                        <p class="tool-launcher-desc">Ingest raw breach dumps, email:pass lists, and stealer archives
+                            directly into the local threat intelligence store.</p>
                     </div>
                     <div class="tool-launcher-card" onclick="launchTool('phone')">
                         <div class="tool-launcher-header">
@@ -752,7 +841,8 @@
                             <span class="tool-launcher-btn mono">LAUNCH &rarr;</span>
                         </div>
                         <h4 class="tool-launcher-title">Reverse Phone Lookup</h4>
-                        <p class="tool-launcher-desc">Lookup international phone numbers across carriers, line types (mobile vs VOIP), and national registries.</p>
+                        <p class="tool-launcher-desc">Lookup international phone numbers across carriers, line types
+                            (mobile vs VOIP), and national registries.</p>
                     </div>
                     <div class="tool-launcher-card" onclick="launchTool('image')">
                         <div class="tool-launcher-header">
@@ -760,7 +850,8 @@
                             <span class="tool-launcher-btn mono">LAUNCH &rarr;</span>
                         </div>
                         <h4 class="tool-launcher-title">Image Correlation</h4>
-                        <p class="tool-launcher-desc">Correlate target avatars and profile photos across multiple search engines and side-by-side comparison.</p>
+                        <p class="tool-launcher-desc">Correlate target avatars and profile photos across multiple search
+                            engines and side-by-side comparison.</p>
                     </div>
                     <div class="tool-launcher-card" onclick="launchTool('batch')">
                         <div class="tool-launcher-header">
@@ -768,7 +859,8 @@
                             <span class="tool-launcher-btn mono">LAUNCH &rarr;</span>
                         </div>
                         <h4 class="tool-launcher-title">Batch Exposure Audit</h4>
-                        <p class="tool-launcher-desc">Audit multiple target identifiers simultaneously to generate an enterprise-wide risk ledger.</p>
+                        <p class="tool-launcher-desc">Audit multiple target identifiers simultaneously to generate an
+                            enterprise-wide risk ledger.</p>
                     </div>
                 </div>
             </div>
@@ -795,7 +887,9 @@
                     <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-2">
                         ENTER TARGET EMAILS (UP TO 20, SEPARATED BY NEWLINES OR COMMAS):
                     </label>
-                    <textarea id="batch-emails-input" class="mono text-xs w-full h-24 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md text-slate-900 dark:text-zinc-100 p-2.5 focus:border-blue-500 dark:focus:border-zinc-500 outline-none" placeholder="alice@cybercorp.io&#10;bob@cybercorp.io&#10;carol@cybercorp.io"></textarea>
+                    <textarea id="batch-emails-input"
+                        class="mono text-xs w-full h-24 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md text-slate-900 dark:text-zinc-100 p-2.5 focus:border-blue-500 dark:focus:border-zinc-500 outline-none"
+                        placeholder="alice@cybercorp.io&#10;bob@cybercorp.io&#10;carol@cybercorp.io"></textarea>
                     <div style="display: flex; gap: 8px; margin-top: 8px;">
                         <button type="button" class="btn-primary" onclick="executeBatchAudit()">
                             Execute Group Audit &rarr;
@@ -805,7 +899,8 @@
                         </button>
                     </div>
                 </div>
-                <div id="batch-results-container" style="display: none; border-top: 1px solid var(--b-hairline); padding-top: 16px;">
+                <div id="batch-results-container"
+                    style="display: none; border-top: 1px solid var(--b-hairline); padding-top: 16px;">
                     <!-- Dynamically populated by executeBatchAudit -->
                 </div>
             </div>
@@ -813,14 +908,17 @@
     </div>
 
     <!-- Corporate Domain Reconnaissance Modal -->
-    <div id="domain-recon-modal" class="modal-backdrop" style="display: none;" onclick="handleDomainModalBackdropClick(event)">
+    <div id="domain-recon-modal" class="modal-backdrop" style="display: none;"
+        onclick="handleDomainModalBackdropClick(event)">
         <div class="modal-dialog" style="max-width: 900px;">
             <div class="modal-header">
                 <div class="modal-title-group">
                     <span class="modal-icon-badge mono text-zinc-400">[RECON]</span>
                     <div>
-                        <h3 class="modal-title tracking-tight" id="domain-modal-title">Corporate Attack Surface Reconnaissance</h3>
-                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono" id="domain-modal-subtitle">
+                        <h3 class="modal-title tracking-tight" id="domain-modal-title">Corporate Attack Surface
+                            Reconnaissance</h3>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono"
+                            id="domain-modal-subtitle">
                             Certificate Transparency &amp; External Login Gateway Telemetry
                         </div>
                     </div>
@@ -837,7 +935,8 @@
     <div id="toast-container" class="toast-container"></div>
 
     <!-- Free AI Engine Settings Modal -->
-    <div id="ai-settings-modal" class="modal-backdrop" style="display: none;" onclick="handleAISettingsBackdropClick(event)">
+    <div id="ai-settings-modal" class="modal-backdrop" style="display: none;"
+        onclick="handleAISettingsBackdropClick(event)">
         <div class="modal-dialog" style="max-width: 520px;">
             <div class="modal-header">
                 <div class="modal-title-group">
@@ -855,40 +954,52 @@
                     <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">
                         AI PROVIDER:
                     </label>
-                    <select id="ai-provider-select" class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200" onchange="onAIProviderChanged()">
+                    <select id="ai-provider-select"
+                        class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200"
+                        onchange="onAIProviderChanged()">
                         <option value="groq" selected>Groq &mdash; Llama 3.3 70B</option>
                         <option value="gemini">Google Gemini &mdash; Gemini 1.5 Flash</option>
                     </select>
                 </div>
 
                 <div style="margin-bottom: 14px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                         <label class="mono text-xs text-slate-600 dark:text-zinc-400">
                             API KEY:
                         </label>
-                        <a id="ai-get-key-link" href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" class="text-xs text-purple-500 dark:text-purple-400 hover:text-purple-400 dark:hover:text-purple-300 mono no-underline">
+                        <a id="ai-get-key-link" href="https://console.groq.com/keys" target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-xs text-purple-500 dark:text-purple-400 hover:text-purple-400 dark:hover:text-purple-300 mono no-underline">
                             Get API Key &nearr;
                         </a>
                     </div>
                     <div style="display: flex; gap: 8px;">
-                        <input type="password" id="ai-api-key-input" class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200" placeholder="Paste API key..." autocomplete="off">
-                        <button type="button" class="btn-secondary mono text-xs px-3" onclick="toggleAIKeyVisibility()">SHOW</button>
+                        <input type="password" id="ai-api-key-input"
+                            class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200"
+                            placeholder="Paste API key..." autocomplete="off">
+                        <button type="button" class="btn-secondary mono text-xs px-3"
+                            onclick="toggleAIKeyVisibility()">SHOW</button>
                     </div>
                 </div>
 
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 16px;">
-                    <button type="button" id="btn-ai-test" class="btn-secondary mono text-xs py-2 px-3" onclick="testAIKeyConnection()">
+                    <button type="button" id="btn-ai-test" class="btn-secondary mono text-xs py-2 px-3"
+                        onclick="testAIKeyConnection()">
                         Test Connection
                     </button>
                     <div style="display: flex; gap: 8px;">
-                        <button type="button" class="btn-tool text-red-400 border-red-900 px-3 py-1.5" onclick="clearAIKey()">Clear Key</button>
+                        <button type="button" class="btn-tool text-red-400 border-red-900 px-3 py-1.5"
+                            onclick="clearAIKey()">Clear Key</button>
                         <button type="button" class="btn-primary mono text-xs py-2 px-4" onclick="saveAISettings()">
                             Save Settings &rarr;
                         </button>
                     </div>
                 </div>
 
-                <div id="ai-test-status" style="margin-top: 12px; display: none; padding: 8px 12px; border-radius: 4px; font-size: 0.75rem;" class="mono"></div>
+                <div id="ai-test-status"
+                    style="margin-top: 12px; display: none; padding: 8px 12px; border-radius: 4px; font-size: 0.75rem;"
+                    class="mono"></div>
 
                 <div style="margin-top: 14px; font-size: 0.7rem; color: #64748b;" class="mono text-center">
                     API keys are stored exclusively in client-side session storage.
@@ -898,7 +1009,8 @@
     </div>
 
     <!-- Combolist Ingestion Modal -->
-    <div id="combolist-modal" class="modal-backdrop" style="display: none;" onclick="handleCombolistModalBackdropClick(event)">
+    <div id="combolist-modal" class="modal-backdrop" style="display: none;"
+        onclick="handleCombolistModalBackdropClick(event)">
         <div class="modal-dialog" style="max-width: 650px;">
             <div class="modal-header">
                 <div class="modal-title-group">
@@ -915,32 +1027,45 @@
             <div class="modal-body">
                 <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 12px;">
                     <div>
-                        <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">LEAK / INCIDENT NAME:</label>
-                        <input type="text" id="combolist-leak-name" class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200" placeholder="e.g. Acme Corp Breach 2024">
+                        <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">LEAK / INCIDENT
+                            NAME:</label>
+                        <input type="text" id="combolist-leak-name"
+                            class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200"
+                            placeholder="e.g. Acme Corp Breach 2024">
                     </div>
                     <div>
                         <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">INCIDENT DATE:</label>
-                        <input type="date" id="combolist-breach-date" class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200">
+                        <input type="date" id="combolist-breach-date"
+                            class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200">
                     </div>
                 </div>
 
                 <div style="margin-bottom: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <label class="mono text-xs text-slate-600 dark:text-zinc-400">CREDENTIAL RECORDS (EMAIL:PASSWORD / USER:EMAIL:PASS):</label>
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label class="mono text-xs text-slate-600 dark:text-zinc-400">CREDENTIAL RECORDS (EMAIL:PASSWORD
+                            / USER:EMAIL:PASS):</label>
                         <span class="mono text-xs text-slate-500 dark:text-zinc-500">Auto-delimited (: ; | tab ,)</span>
                     </div>
-                    <textarea id="combolist-textarea" class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-xs" style="height: 180px; resize: vertical;" placeholder="alice@target.com:P@ssw0rd123&#10;bob@corp.io:Secret99!&#10;carol:carol@firm.com:Spring2024$"></textarea>
+                    <textarea id="combolist-textarea"
+                        class="modal-input mono w-full bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-xs"
+                        style="height: 180px; resize: vertical;"
+                        placeholder="alice@target.com:P@ssw0rd123&#10;bob@corp.io:Secret99!&#10;carol:carol@firm.com:Spring2024$"></textarea>
                 </div>
 
-                <div id="combolist-status" style="margin-bottom: 12px; display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.78rem;" class="mono"></div>
+                <div id="combolist-status"
+                    style="margin-bottom: 12px; display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.78rem;"
+                    class="mono"></div>
 
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 16px;">
                     <button type="button" class="btn-secondary mono text-xs py-2 px-3" onclick="loadSampleCombolist()">
                         Load Sample Records
                     </button>
                     <div style="display: flex; gap: 8px;">
-                        <button type="button" class="btn-tool text-zinc-400 border-zinc-700 px-3 py-1.5" onclick="closeCombolistModal()">Cancel</button>
-                        <button type="button" id="btn-submit-combolist" class="btn-primary mono text-xs py-2 px-4" onclick="submitCombolistImport()">
+                        <button type="button" class="btn-tool text-zinc-400 border-zinc-700 px-3 py-1.5"
+                            onclick="closeCombolistModal()">Cancel</button>
+                        <button type="button" id="btn-submit-combolist" class="btn-primary mono text-xs py-2 px-4"
+                            onclick="submitCombolistImport()">
                             Ingest &amp; Correlate &rarr;
                         </button>
                     </div>
@@ -950,7 +1075,8 @@
     </div>
 
     <!-- Reverse Phone Number Search Modal -->
-    <div id="reverse-phone-modal" class="modal-backdrop" style="display: none;" onclick="handleReversePhoneModalBackdropClick(event)">
+    <div id="reverse-phone-modal" class="modal-backdrop" style="display: none;"
+        onclick="handleReversePhoneModalBackdropClick(event)">
         <div class="modal-dialog" style="max-width: 720px;">
             <div class="modal-header">
                 <div class="modal-title-group">
@@ -958,7 +1084,8 @@
                     <div>
                         <h3 class="modal-title tracking-tight">Reverse Phone Number Intelligence</h3>
                         <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono">
-                            E.164 normalization, carrier network identification, line classification, and national registry dispatch
+                            E.164 normalization, carrier network identification, line classification, and national
+                            registry dispatch
                         </div>
                     </div>
                 </div>
@@ -966,23 +1093,34 @@
             </div>
             <div class="modal-body">
                 <div style="margin-bottom: 14px;">
-                    <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">TARGET PHONE NUMBER (ANY INTERNATIONAL FORMAT):</label>
+                    <label class="mono text-xs text-slate-600 dark:text-zinc-400 block mb-1">TARGET PHONE NUMBER (ANY
+                        INTERNATIONAL FORMAT):</label>
                     <div style="display: flex; gap: 8px;">
-                        <input type="text" id="modal-phone-input" class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-sm" placeholder="e.g. +4791234567, 0701234567, +31612345678, +14155552671" onkeydown="if(event.key==='Enter') executeModalReversePhoneSearch()">
-                        <button type="button" id="btn-modal-phone-search" class="btn-primary mono text-xs py-2 px-4" onclick="executeModalReversePhoneSearch()">
+                        <input type="text" id="modal-phone-input"
+                            class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-sm"
+                            placeholder="e.g. +4791234567, 0701234567, +31612345678, +14155552671"
+                            onkeydown="if(event.key==='Enter') executeModalReversePhoneSearch()">
+                        <button type="button" id="btn-modal-phone-search" class="btn-primary mono text-xs py-2 px-4"
+                            onclick="executeModalReversePhoneSearch()">
                             Analyze &rarr;
                         </button>
                     </div>
                     <div style="display: flex; gap: 6px; margin-top: 6px; align-items: center; flex-wrap: wrap;">
                         <span class="mono text-[11px] text-slate-500 dark:text-zinc-500">TEST PRESETS:</span>
-                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="setModalPhonePreset('+4791234567')">[NO] +47 912 34 567</button>
-                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="setModalPhonePreset('+31612345678')">[NL] +31 6 12345678</button>
-                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="setModalPhonePreset('+14155552671')">[US] +1 415 555 2671</button>
-                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2" onclick="setModalPhonePreset('+48501234567')">[PL] +48 501 234 567</button>
+                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2"
+                            onclick="setModalPhonePreset('+4791234567')">[NO] +47 912 34 567</button>
+                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2"
+                            onclick="setModalPhonePreset('+31612345678')">[NL] +31 6 12345678</button>
+                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2"
+                            onclick="setModalPhonePreset('+14155552671')">[US] +1 415 555 2671</button>
+                        <button type="button" class="btn-tool text-[10px] py-0.5 px-2"
+                            onclick="setModalPhonePreset('+48501234567')">[PL] +48 501 234 567</button>
                     </div>
                 </div>
 
-                <div id="modal-phone-status" style="display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.78rem; margin-bottom: 12px;" class="mono"></div>
+                <div id="modal-phone-status"
+                    style="display: none; padding: 10px 14px; border-radius: 6px; font-size: 0.78rem; margin-bottom: 12px;"
+                    class="mono"></div>
 
                 <div id="modal-phone-results" style="display: none; max-height: 480px; overflow-y: auto;">
                     <!-- Dynamically populated via JS -->
@@ -992,15 +1130,18 @@
     </div>
 
     <!-- Image Correlation & Visual Comparison Modal -->
-    <div id="image-correlation-modal" class="modal-backdrop" style="display: none;" onclick="handleImageCorrelationModalBackdropClick(event)">
+    <div id="image-correlation-modal" class="modal-backdrop" style="display: none;"
+        onclick="handleImageCorrelationModalBackdropClick(event)">
         <div class="modal-dialog" style="max-width: 820px;">
             <div class="modal-header">
                 <div class="modal-title-group">
                     <span class="modal-icon-badge mono text-purple-400">[IMAGE CORRELATION]</span>
                     <div>
-                        <h3 class="modal-title tracking-tight">Visual Identity &amp; Cross-Platform Avatar Correlation</h3>
+                        <h3 class="modal-title tracking-tight">Visual Identity &amp; Cross-Platform Avatar Correlation
+                        </h3>
                         <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.2rem;" class="mono">
-                            Harvested platform avatars, multi-engine reverse visual searches, and side-by-side identity verification
+                            Harvested platform avatars, multi-engine reverse visual searches, and side-by-side identity
+                            verification
                         </div>
                     </div>
                 </div>
@@ -1008,42 +1149,57 @@
             </div>
             <div class="modal-body">
                 <!-- Custom Image Reverse Search Launcher -->
-                <div style="background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+                <div
+                    style="background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
                     <label class="mono text-xs text-purple-400 block mb-1">REVERSE LOOKUP ARBITRARY IMAGE URL:</label>
                     <div style="display: flex; gap: 8px;">
-                        <input type="text" id="modal-custom-img-input" class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-xs" placeholder="https://example.com/avatar.jpg" onkeydown="if(event.key==='Enter') executeCustomImageReverseSearch()">
-                        <button type="button" class="btn-primary mono text-xs py-2 px-3" onclick="executeCustomImageReverseSearch()">
+                        <input type="text" id="modal-custom-img-input"
+                            class="modal-input mono flex-1 bg-white dark:bg-zinc-950 border border-slate-300 dark:border-zinc-800 rounded-md p-2 text-slate-900 dark:text-zinc-200 text-xs"
+                            placeholder="https://example.com/avatar.jpg"
+                            onkeydown="if(event.key==='Enter') executeCustomImageReverseSearch()">
+                        <button type="button" class="btn-primary mono text-xs py-2 px-3"
+                            onclick="executeCustomImageReverseSearch()">
                             Launch Lookups &rarr;
                         </button>
                     </div>
-                    <div id="modal-custom-img-links" style="display: none; margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px;"></div>
+                    <div id="modal-custom-img-links"
+                        style="display: none; margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px;"></div>
                 </div>
 
                 <!-- Harvested Target Avatars Section -->
                 <div style="margin-bottom: 16px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span class="mono text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wide">HARVESTED TARGET AVATARS:</span>
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span
+                            class="mono text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wide">HARVESTED
+                            TARGET AVATARS:</span>
                         <span id="modal-avatar-count" class="badge-pill badge-clean mono">0 AVATARS</span>
                     </div>
-                    <div id="modal-avatars-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;">
+                    <div id="modal-avatars-grid"
+                        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;">
                         <!-- Dynamically populated via JS -->
                     </div>
                 </div>
 
                 <!-- Side-by-Side Visual Comparison Tool -->
-                <div id="modal-comparison-section" style="display: none; border-top: 1px solid var(--b-hairline); padding-top: 14px;">
+                <div id="modal-comparison-section"
+                    style="display: none; border-top: 1px solid var(--b-hairline); padding-top: 14px;">
                     <div class="mono text-xs font-bold text-slate-800 dark:text-zinc-200 uppercase tracking-wide mb-2">
                         SIDE-BY-SIDE VISUAL COMPARISON INSPECTOR:
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
-                        <div id="compare-pane-a" style="border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px; text-align: center; background: var(--c-canvas);">
+                        <div id="compare-pane-a"
+                            style="border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px; text-align: center; background: var(--c-canvas);">
                             <div class="mono text-[11px] text-zinc-500 mb-2">IMAGE A (BASE PROFILE)</div>
-                            <img id="compare-img-a" src="" alt="Avatar A" style="max-height: 180px; max-width: 100%; border-radius: 6px; margin: 0 auto; display: block; object-fit: contain;">
+                            <img id="compare-img-a" src="" alt="Avatar A"
+                                style="max-height: 180px; max-width: 100%; border-radius: 6px; margin: 0 auto; display: block; object-fit: contain;">
                             <div id="compare-meta-a" class="mono text-[11px] mt-2 text-zinc-400"></div>
                         </div>
-                        <div id="compare-pane-b" style="border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px; text-align: center; background: var(--c-canvas);">
+                        <div id="compare-pane-b"
+                            style="border: 1px solid var(--b-hairline); border-radius: 6px; padding: 10px; text-align: center; background: var(--c-canvas);">
                             <div class="mono text-[11px] text-zinc-500 mb-2">IMAGE B (CORRELATED PROFILE)</div>
-                            <img id="compare-img-b" src="" alt="Avatar B" style="max-height: 180px; max-width: 100%; border-radius: 6px; margin: 0 auto; display: block; object-fit: contain;">
+                            <img id="compare-img-b" src="" alt="Avatar B"
+                                style="max-height: 180px; max-width: 100%; border-radius: 6px; margin: 0 auto; display: block; object-fit: contain;">
                             <div id="compare-meta-b" class="mono text-[11px] mt-2 text-zinc-400"></div>
                         </div>
                     </div>
@@ -1052,8 +1208,91 @@
         </div>
     </div>
 
+    <!-- Browser Session & LinkedIn Connect Modal -->
+    <div id="sessions-vault-modal" class="modal-backdrop" style="display: none;"
+        onclick="handleSessionsModalBackdropClick(event)">
+        <div class="modal-dialog" style="max-width: 520px; border: 1px solid rgba(56, 189, 248, 0.25); background: #0c121e; box-shadow: 0 24px 48px rgba(0,0,0,0.7); border-radius: 12px; overflow: hidden;">
+            <div class="modal-header" style="padding: 1.2rem 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); display: flex; align-items: center; justify-content: center; color: #38bdf8;">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="modal-title" style="margin: 0; font-size: 1.05rem; font-weight: 700; color: #f8fafc; letter-spacing: -0.01em;">Connect Browser</h3>
+                        <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">Authenticate LinkedIn via your local browser</div>
+                    </div>
+                </div>
+                <button type="button" class="btn-modal-close" onclick="closeSessionsModal()" style="font-size: 1.4rem; color: #94a3b8; background: transparent; border: none; cursor: pointer;">&times;</button>
+            </div>
+            
+            <div class="modal-body" style="padding: 1.5rem;">
+                <!-- Status Badge & Visual Indicator -->
+                <div id="vault-status-card" style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 10px; padding: 1.1rem; text-align: center; margin-bottom: 1.25rem;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+                        <span id="vault-status-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #64748b; display: inline-block;"></span>
+                        <span id="vault-li-status" class="mono" style="font-weight: 700; font-size: 0.85rem; letter-spacing: 0.05em; color: #94a3b8;">CHECKING STATUS...</span>
+                    </div>
+                    
+                    <div id="vault-li-account-box" style="display: none; margin-top: 0.4rem; font-size: 0.82rem; color: #cbd5e1;">
+                        Connected as <strong id="vault-li-account-name" style="color: #38bdf8;"></strong>
+                    </div>
+                    
+                    <p id="vault-status-description" style="font-size: 0.78rem; color: #94a3b8; margin: 0.5rem 0 0; line-height: 1.45;">
+                        Connect your desktop browser once to enable private LinkedIn profile intelligence without getting flagged.
+                    </p>
+                </div>
+
+                <!-- Primary Action Button -->
+                <button type="button" id="btn-vault-launch-browser" 
+                    style="width: 100%; padding: 0.85rem 1.25rem; font-weight: 700; font-size: 0.9rem; border-radius: 8px; cursor: pointer; background: linear-gradient(135deg, #0284c7, #0369a1); border: 1px solid #38bdf8; color: #ffffff; display: flex; align-items: center; justify-content: center; gap: 0.5rem; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35); transition: all 0.2s ease;"
+                    onclick="window.connectDesktopBrowser()">
+                    <span id="btn-launch-icon">🚀</span>
+                    <span id="btn-launch-text">Launch Browser &amp; Connect</span>
+                </button>
+
+                <!-- Feedback & Instructions Box -->
+                <div id="vault-modal-feedback" style="display: none; margin-top: 1rem; font-size: 0.78rem; padding: 0.75rem 1rem; border-radius: 8px; line-height: 1.4;" class="mono"></div>
+
+                <!-- Subtle Advanced Drawer (Collapsed by Default) -->
+                <details style="margin-top: 1.25rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.75rem;">
+                    <summary style="font-size: 0.72rem; color: #64748b; cursor: pointer; user-select: none;" class="mono">
+                        ▸ Advanced: Manual Cookie Input (.env)
+                    </summary>
+                    <div style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem;">
+                        <div>
+                            <label style="font-size: 0.7rem; color: #94a3b8;" class="mono">LinkedIn li_at cookie:</label>
+                            <input type="password" id="vault-li-cookie-input" class="modal-input mono"
+                                style="font-size: 0.75rem; padding: 6px 10px; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid #334155; border-radius: 6px; color: #f1f5f9; margin-top: 3px;"
+                                placeholder="AQEDA..." autocomplete="off">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.7rem; color: #94a3b8;" class="mono">LinkedIn JSESSIONID:</label>
+                            <input type="text" id="vault-li-jsession-input" class="modal-input mono"
+                                style="font-size: 0.75rem; padding: 6px 10px; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid #334155; border-radius: 6px; color: #f1f5f9; margin-top: 3px;"
+                                placeholder='ajax:1234...' autocomplete="off">
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
+                            <button type="button" id="btn-vault-save-li" class="btn-tool mono text-xs py-1 px-3" style="cursor: pointer;" onclick="saveLinkedInCookieFromModal()">
+                                Save to .env
+                            </button>
+                        </div>
+                    </div>
+                </details>
+            </div>
+            
+            <div class="modal-footer" style="padding: 0.75rem 1.5rem; border-top: 1px solid rgba(255,255,255,0.06); display: flex; justify-content: flex-end; background: rgba(0,0,0,0.2);">
+                <button type="button" class="btn-tool text-zinc-400 border-zinc-700 px-4 py-1.5" onclick="closeSessionsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Floating Persistent AI Copilot Launcher Button -->
-    <div id="ai-copilot-floating-btn" class="ai-copilot-floating-btn" onclick="toggleAICopilotDrawer()" title="Open AI Threat Copilot">
+    <div id="ai-copilot-floating-btn" class="ai-copilot-floating-btn" onclick="toggleAICopilotDrawer()"
+        title="Open AI Threat Copilot">
         <span class="copilot-pulse-dot"></span>
         <span class="copilot-floating-text">AI AGENT</span>
         <span id="copilot-unread-badge" class="copilot-unread-badge" style="display: none;">1</span>
@@ -1074,15 +1313,19 @@
                 <div class="copilot-engine-label" id="copilot-engine-label">Groq Llama 3.3 • Live Assistant</div>
             </div>
             <div class="copilot-header-actions">
-                <button type="button" class="btn-copilot-tool" onclick="openAISettingsModal()" title="AI Provider Settings">Settings</button>
-                <button type="button" id="btn-reanalyze-copilot" class="btn-copilot-tool btn-copilot-purple" onclick="reanalyzeCurrentAI()" title="Re-evaluate Intelligence">[RE-EVALUATE]</button>
-                <button type="button" class="btn-copilot-close" onclick="closeAICopilotDrawer()" title="Close Copilot">&times;</button>
+                <button type="button" class="btn-copilot-tool" onclick="openAISettingsModal()"
+                    title="AI Provider Settings">Settings</button>
+                <button type="button" id="btn-reanalyze-copilot" class="btn-copilot-tool btn-copilot-purple"
+                    onclick="reanalyzeCurrentAI()" title="Re-evaluate Intelligence">[RE-EVALUATE]</button>
+                <button type="button" class="btn-copilot-close" onclick="closeAICopilotDrawer()"
+                    title="Close Copilot">&times;</button>
             </div>
         </div>
 
         <!-- Copilot Tab Switcher -->
         <div class="copilot-tabs-nav">
-            <button type="button" id="copilot-tab-btn-dossier" class="copilot-tab-btn active" onclick="switchCopilotTab('dossier')">
+            <button type="button" id="copilot-tab-btn-dossier" class="copilot-tab-btn active"
+                onclick="switchCopilotTab('dossier')">
                 EXECUTIVE DOSSIER
             </button>
             <button type="button" id="copilot-tab-btn-chat" class="copilot-tab-btn" onclick="switchCopilotTab('chat')">
@@ -1097,7 +1340,8 @@
                 <div id="copilot-dossier-content" class="copilot-dossier-content">
                     <div class="copilot-empty-state">
                         <div class="copilot-empty-title">Awaiting Target Scan</div>
-                        <div class="copilot-empty-desc">Run an investigation query to synthesize an automated executive threat dossier.</div>
+                        <div class="copilot-empty-desc">Run an investigation query to synthesize an automated executive
+                            threat dossier.</div>
                     </div>
                 </div>
             </div>
@@ -1108,21 +1352,29 @@
                     <div class="chat-bubble chat-ai">
                         <div class="chat-bubble-author">AI AGENT</div>
                         <div class="chat-bubble-body">
-                            I am your automated identity exposure copilot. Ask me about specific breach exposures, password vulnerability correlations, or defensive remediation steps for this target.
+                            I am your automated identity exposure copilot. Ask me about specific breach exposures,
+                            password vulnerability correlations, or defensive remediation steps for this target.
                         </div>
                     </div>
                 </div>
 
                 <!-- Quick Prompt Chips -->
                 <div class="copilot-quick-prompts">
-                    <button type="button" class="copilot-chip" onclick="askCopilotPrompt('What are the most urgent risk exposures for this target?')">Top Exposures</button>
-                    <button type="button" class="copilot-chip" onclick="askCopilotPrompt('Explain the attack blast radius of the compromised passwords')">Password Blast Radius</button>
-                    <button type="button" class="copilot-chip" onclick="askCopilotPrompt('Generate a prioritized defensive action checklist for this identity')">Defensive Checklist</button>
+                    <button type="button" class="copilot-chip"
+                        onclick="askCopilotPrompt('What are the most urgent risk exposures for this target?')">Top
+                        Exposures</button>
+                    <button type="button" class="copilot-chip"
+                        onclick="askCopilotPrompt('Explain the attack blast radius of the compromised passwords')">Password
+                        Blast Radius</button>
+                    <button type="button" class="copilot-chip"
+                        onclick="askCopilotPrompt('Generate a prioritized defensive action checklist for this identity')">Defensive
+                        Checklist</button>
                 </div>
 
                 <!-- Chat Input Row -->
                 <form id="copilot-chat-form" class="copilot-chat-input-row" onsubmit="handleCopilotSubmit(event)">
-                    <input type="text" id="copilot-chat-input" class="copilot-input-field" placeholder="Ask AI about this target..." autocomplete="off">
+                    <input type="text" id="copilot-chat-input" class="copilot-input-field"
+                        placeholder="Ask AI about this target..." autocomplete="off">
                     <button type="submit" id="btn-copilot-send" class="btn-copilot-send">
                         <span>Send</span>
                     </button>
@@ -1132,6 +1384,7 @@
     </aside>
 
     <!-- Custom Application Logic -->
-    <script src="/static/js/app.v17.js"></script>
+    <script src="/static/js/app.v18.js?v=20260925_dual_workplace_v5"></script>
 </body>
+
 </html>

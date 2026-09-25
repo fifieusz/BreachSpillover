@@ -18,7 +18,7 @@ def normalize_name_string(name: str) -> str:
         return ""
     # Strip emojis and non-ascii symbols
     name = re.sub(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55\u203c-\u3299]', '', name)
-    # Decompose unicode characters (e.g. Šečić -> Secic)
+    # Decompose unicode characters (e.g. accented characters -> ascii)
     decomposed = unicodedata.normalize('NFKD', name)
     stripped = ''.join(c for c in decomposed if not unicodedata.combining(c))
     cleaned = re.sub(r'[^a-zA-Z0-9\s]', ' ', stripped).lower()
@@ -70,16 +70,16 @@ def compare_names(target_name: str, candidate_name: str) -> Tuple[bool, bool, fl
     if is_corporate_or_generic_entity(candidate_name):
         return (False, True, 0.1, f"Corporate entity name collision ('{candidate_name}')")
 
-    # If target has at least first and last name (e.g. Amir Secic)
+    # If target has at least first and last name (e.g. Alex Morgan)
     if len(t_tokens) >= 2:
         t_first = t_tokens[0]
         t_last = t_tokens[-1]
 
-        # Case 1: Candidate has matching first and last name (e.g. Secic Amir or Amir X Secic)
+        # Case 1: Candidate has matching first and last name (e.g. Morgan Alex or Alex X Morgan)
         if t_first in c_tokens and t_last in c_tokens:
             return (True, False, 0.95, f"Full name tokens matched ('{t_first.capitalize()} {t_last.capitalize()}')")
 
-        # Case 2: Candidate has same last name but conflicting first name (e.g. Afan Secic vs Amir Secic)
+        # Case 2: Candidate has same last name but conflicting first name (e.g. David Morgan vs Alex Morgan)
         if t_last in c_tokens:
             # Check candidate first token
             c_first = c_tokens[0] if c_tokens[0] != t_last else (c_tokens[-1] if len(c_tokens) > 1 else "")
@@ -87,19 +87,19 @@ def compare_names(target_name: str, candidate_name: str) -> Tuple[bool, bool, fl
                 # Distinct first name with same surname -> different person / family relative
                 return (False, True, 0.15, f"Conflicting given name ('{c_first.capitalize()}' vs target '{t_first.capitalize()}')")
 
-        # Case 3: Candidate has same first name but conflicting last name (e.g. Amir Petrovic vs Amir Secic)
+        # Case 3: Candidate has same first name but conflicting last name (e.g. Alex Henderson vs Alex Morgan)
         if t_first in c_tokens:
             c_last = c_tokens[-1] if c_tokens[-1] != t_first else (c_tokens[0] if len(c_tokens) > 1 else "")
             if c_last and c_last != t_last:
                 return (False, True, 0.10, f"Conflicting family surname ('{c_last.capitalize()}' vs target '{t_last.capitalize()}')")
 
-        # Case 4: First initial + Last name match (e.g. A. Secic)
+        # Case 4: First initial + Last name match (e.g. A. Morgan)
         if len(c_tokens) >= 2 and t_last in c_tokens:
             c_initial = c_tokens[0][0]
             if c_initial == t_first[0]:
                 return (True, False, 0.88, f"Initial and surname match ('{c_initial.upper()}. {t_last.capitalize()}')")
 
-        # Case 5: Completely disjoint stranger name (e.g. Carlos Steve Garcia vs Amir Secic)
+        # Case 5: Completely disjoint stranger name (e.g. Carlos Garcia vs Alex Morgan)
         overlap = set(t_tokens).intersection(set(c_tokens))
         if not overlap:
             if len(c_tokens) >= 2:

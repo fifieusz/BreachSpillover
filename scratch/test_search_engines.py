@@ -1,42 +1,53 @@
 import urllib.request
 import urllib.parse
+import json
 import re
 
-print("--- Testing html.duckduckgo.com/html/ ---")
-url = "https://html.duckduckgo.com/html/"
-data = urllib.parse.urlencode({'q': 'Yasir Kadhim'}).encode('utf-8')
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Referer': 'https://duckduckgo.com/'
-}
+query = 'Alje Woltjer linkedin'
+
+# Test 1: Yahoo search
 try:
-    req = urllib.request.Request(url, data=data, headers=headers)
+    url = f"https://search.yahoo.com/search?p={urllib.parse.quote(query)}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
     with urllib.request.urlopen(req, timeout=5) as resp:
         html = resp.read().decode('utf-8', errors='ignore')
-    print("html.ddg length:", len(html))
-    links = re.findall(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html)
-    print("html.ddg result__a links:", len(links))
-    for h, t in links[:5]:
-        print(" ->", re.sub(r'<[^>]+>', '', t).strip(), "->", h)
+        print(f"Yahoo: length {len(html)}")
+        # find linkedin urls
+        li_urls = re.findall(r'https?://[a-z]{0,3}\.?linkedin\.com/in/[a-zA-Z0-9\-_%]+', html)
+        print("Yahoo LinkedIn matches:", set(li_urls))
+        if "alje" in html.lower() and "woltjer" in html.lower():
+            print("Yahoo contains Alje Woltjer!")
+            # let's see snippets
+            for m in re.finditer(r'Alje Woltjer', html, re.IGNORECASE):
+                start = max(0, m.start() - 50)
+                end = min(len(html), m.end() + 150)
+                print("  Yahoo snippet:", re.sub(r'<[^>]+>', ' ', html[start:end]))
 except Exception as e:
-    print("html.ddg error:", e)
+    print("Yahoo error:", e)
 
-print("\n--- Testing Google Search ---")
-g_url = "https://www.google.com/search?q=" + urllib.parse.quote("Yasir Kadhim")
-g_headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-}
+# Test 2: Qwant
 try:
-    req = urllib.request.Request(g_url, headers=g_headers)
+    url = f"https://api.qwant.com/v3/search/web?q={urllib.parse.quote(query)}&count=10&locale=en_US"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
     with urllib.request.urlopen(req, timeout=5) as resp:
-        g_html = resp.read().decode('utf-8', errors='ignore')
-    print("Google length:", len(g_html))
-    g_links = re.findall(r'<a href="(/url\?q=[^"&]+|https://[^"]+)"[^>]*><h3[^>]*>(.*?)</h3>', g_html)
-    print("Google h3 links:", len(g_links))
-    for h, t in g_links[:5]:
-        print(" ->", re.sub(r'<[^>]+>', '', t).strip(), "->", h)
+        data = json.loads(resp.read().decode('utf-8'))
+        print("Qwant count:", len(data.get('data', {}).get('result', {}).get('items', {}).get('mainline', [])))
 except Exception as e:
-    print("Google error:", e)
+    print("Qwant error:", e)
+
+# Test 3: Brave search free / web
+try:
+    url = f"https://search.brave.com/search?q={urllib.parse.quote(query)}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        html = resp.read().decode('utf-8', errors='ignore')
+        print(f"Brave: length {len(html)}")
+        li_urls = re.findall(r'https?://[a-z]{0,3}\.?linkedin\.com/in/[a-zA-Z0-9\-_%]+', html)
+        print("Brave LinkedIn matches:", set(li_urls))
+        for m in re.finditer(r'Alje Woltjer', html, re.IGNORECASE):
+            start = max(0, m.start() - 50)
+            end = min(len(html), m.end() + 150)
+            print("  Brave snippet:", re.sub(r'<[^>]+>', ' ', html[start:end]))
+            break
+except Exception as e:
+    print("Brave error:", e)

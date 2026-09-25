@@ -1,0 +1,5 @@
+2026/09/25-05:51:39.243 8d74 Creating DB C:\Users\filip\Downloads\BreachSpillover\BreachSpillover\data\browser_session_isolated\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/09/25-05:51:39.338 8d74 Reusing MANIFEST C:\Users\filip\Downloads\BreachSpillover\BreachSpillover\data\browser_session_isolated\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/09/25-05:51:39.418 8fc8 Level-0 table #5: started
+2026/09/25-05:51:39.422 8fc8 Level-0 table #5: 683284 bytes OK
+2026/09/25-05:51:39.423 8fc8 Delete type=0 #3

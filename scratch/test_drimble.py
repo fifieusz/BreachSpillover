@@ -1,30 +1,15 @@
-import urllib.request
-import urllib.parse
-import re
+import urllib.request, re, sys
+sys.stdout.reconfigure(encoding='utf-8')
 
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-    'Accept-Language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7'
-}
-
-queries = [
-    "https://drimble.nl/zoeken?q=" + urllib.parse.quote("Yasir Kadhim"),
-    "https://drimble.nl/zoeken?q=" + urllib.parse.quote("Kadhim Bergschenhoek"),
-    "https://drimble.nl/zoeken?q=" + urllib.parse.quote("JY Collective"),
-]
-
-for url in queries:
-    try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            html = resp.read().decode('utf-8', errors='ignore')
-        print(f"URL: {url} -> Status: {resp.status}, Len: {len(html)}")
-        # Look for text matches
-        cards = re.findall(r'<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)</a>', html)
-        matches = [c for c in cards if any(k in c[1].lower() for k in ['kadhim', 'kadim', 'jy collective', 'yasir'])]
-        print(f"Found {len(matches)} matches:")
-        for m in matches[:5]:
-            clean = re.sub(r'<[^>]+>', ' ', m[1]).strip()
-            print("  -", m[0], ":", clean)
-    except Exception as e:
-        print(f"URL: {url} Failed: {e}")
+url = 'https://drimble.nl/zoeken/?q=82224056'
+req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+try:
+    with urllib.request.urlopen(req, timeout=5) as r:
+        html = r.read().decode('utf-8', errors='ignore')
+        print('Drimble Status:', r.status)
+        title = re.search(r'<title>(.*?)</title>', html)
+        print('Title:', title.group(1) if title else 'No title')
+        for match in re.findall(r'<a[^>]*href="(/bedrijf/[^"]+)"[^>]*>(.*?)</a>', html):
+            print('  Bedrijf link:', match[0], '|', re.sub(r'<[^>]+>', '', match[1]).strip())
+except Exception as e:
+    print('Error:', e)

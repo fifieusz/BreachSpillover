@@ -1324,6 +1324,10 @@ async function initApp() {
     initStandbyState();
     updateDeclassifyStatusBadge();
     await checkServerAIStatus();
+    const bridge = await checkBridgeStatus();
+    if (!bridge || !bridge.authenticated) {
+        openBridgeModal("startup");
+    }
 }
 
 function setupEventListeners() {
@@ -1673,7 +1677,7 @@ function loadExampleTarget(email) {
         updateSearchInputTypeBadge();
     }
     currentEmail = targetEmail;
-    executeInvestigation(targetEmail);
+    routeInvestigationWithBridgeCheck(targetEmail);
     showToast(`Loaded live OSINT specimen: ${targetEmail}`, "info");
 }
 window.loadExampleTarget = loadExampleTarget;
@@ -1759,7 +1763,7 @@ function triggerSearch() {
             }
         }
         currentEmail = extractedEmail;
-        executeInvestigation(currentEmail);
+        routeInvestigationWithBridgeCheck(currentEmail);
         return;
     }
 
@@ -1772,7 +1776,7 @@ function triggerSearch() {
     }
 
     currentEmail = rawVal;
-    executeInvestigation(currentEmail);
+    routeInvestigationWithBridgeCheck(currentEmail);
 }
 
 function closeDomainReconModal() {
@@ -7538,3 +7542,293 @@ window.filterPivotCategory = function(selectedCat) {
     });
     if (window.SoundManager) window.SoundManager.play("click");
 };
+
+/* ==========================================================================
+ * 14. LINKEDIN INVESTIGATOR RECON BRIDGE (ZERO-CONFIG LOCAL AUTHENTICATION)
+ * ========================================================================== */
+let bridgeStatusData = null;
+let bridgePollInterval = null;
+let pendingInvestigationTarget = null;
+let bridgeModalReason = "startup";
+
+function routeInvestigationWithBridgeCheck(target) {
+    if (!bridgeStatusData || !bridgeStatusData.authenticated) {
+        openBridgeModal("scan_intercept", target);
+        return;
+    }
+    executeInvestigation(target);
+}
+
+async function checkBridgeStatus(manualToast = false) {
+    try {
+        const resp = await fetch("/api/bridge/status");
+        if (resp.ok) {
+            bridgeStatusData = await resp.json();
+            updateBridgeUI(bridgeStatusData, manualToast);
+            return bridgeStatusData;
+        }
+    } catch (e) {
+        console.warn("Could not query /api/bridge/status:", e);
+        if (manualToast) {
+            showToast("Failed to connect to bridge API: " + e.message, "error");
+        }
+    }
+    return null;
+}
+
+function updateBridgeUI(status, manualToast = false) {
+    if (!status) return;
+
+    const modalBadge = document.getElementById("bridge-modal-status-badge");
+    const detectedBrowser = document.getElementById("bridge-detected-browser");
+    const noticeBox = document.getElementById("bridge-account-notice-box");
+    const noticeTitle = document.getElementById("bridge-account-notice-title");
+    const noticeDesc = document.getElementById("bridge-account-notice-desc");
+    const launchBtn = document.getElementById("btn-launch-bridge-login");
+    const launchBtnText = document.getElementById("btn-launch-bridge-text");
+
+    if (detectedBrowser && status.browser_path) {
+        const pLower = status.browser_path.toLowerCase();
+        const name = pLower.includes("edge") ? "Microsoft Edge" : (pLower.includes("chrome") ? "Google Chrome" : "System Chromium");
+        detectedBrowser.innerText = name;
+    }
+
+    // Google Sign-In or Registration Notice Detection
+    if (noticeBox) {
+        if (status.notice) {
+            noticeBox.style.display = "block";
+            if (noticeTitle) {
+                noticeTitle.innerText = status.account_issue === "not_registered"
+                    ? "Google Account Not Registered on LinkedIn"
+                    : "Browser Verification Notice";
+            }
+            if (noticeDesc) {
+                noticeDesc.innerText = status.notice;
+            }
+        } else {
+            noticeBox.style.display = "none";
+        }
+    }
+
+    if (status.authenticated) {
+        if (modalBadge) {
+            modalBadge.className = "font-mono text-[10px] px-2 py-0.5 rounded font-bold bg-emerald-950 text-emerald-400 border border-emerald-800";
+            modalBadge.innerText = "AUTHENTICATED & READY";
+        }
+        if (launchBtnText) {
+            launchBtnText.innerText = "✓ LinkedIn Session Connected & Active";
+        }
+        if (noticeBox) {
+            noticeBox.style.display = "none";
+        }
+        stopBridgePolling();
+        if (manualToast) {
+            showToast("LinkedIn Bridge authenticated! Automated scraping enabled.", "success");
+        }
+    } else {
+        if (modalBadge) {
+            modalBadge.className = "font-mono text-[10px] px-2 py-0.5 rounded font-bold bg-amber-950 text-amber-400 border border-amber-800";
+            modalBadge.innerText = "NOT CONNECTED";
+        }
+        if (launchBtnText) {
+            launchBtnText.innerText = "Log In Now (Sign in with Google or Password) →";
+        }
+    }
+}
+
+function openBridgeModal(reason = "startup", target = null) {
+    const modal = document.getElementById("bridge-settings-modal");
+    if (!modal) return;
+
+    bridgeModalReason = reason;
+    if (target) {
+        pendingInvestigationTarget = target;
+    }
+
+    const badgeEl = document.getElementById("bridge-modal-alert-badge");
+    const titleEl = document.getElementById("bridge-modal-title");
+    const subtitleEl = document.getElementById("bridge-modal-subtitle");
+    const headingEl = document.getElementById("bridge-modal-warning-heading");
+    const textEl = document.getElementById("bridge-modal-warning-text");
+    const proceedBtn = document.getElementById("btn-proceed-inaccurate");
+
+    if (reason === "scan_intercept") {
+        if (badgeEl) badgeEl.innerText = "[SCAN PAUSED: SESSION REQUIRED]";
+        if (titleEl) titleEl.innerText = "Target Scan Intercepted: Inaccurate Results Warning";
+        if (subtitleEl) subtitleEl.innerText = `Investigation of target "${target || ''}" paused`;
+        if (headingEl) headingEl.innerText = "High Risk of Inaccurate & Missing Attribution";
+        if (textEl) {
+            textEl.innerHTML = `You are attempting to investigate <strong>${escapeHtml(target || '')}</strong> without an active LinkedIn session. Without it, current employer verification, job titles, and LinkedIn profile matching will be completely omitted or highly inaccurate. Do you want to log in now for 100% full intelligence?`;
+        }
+        if (proceedBtn) {
+            proceedBtn.innerHTML = `<span>Proceed With Inaccurate Results Anyway &times;</span>`;
+        }
+    } else {
+        if (badgeEl) badgeEl.innerText = "[SESSION REQUIRED]";
+        if (titleEl) titleEl.innerText = "LinkedIn Reconnaissance Session Required";
+        if (subtitleEl) subtitleEl.innerText = "Critical local browser capability for employer attribution & profile discovery";
+        if (headingEl) headingEl.innerText = "Why is this required?";
+        if (textEl) {
+            textEl.innerHTML = `BreachSpillover uses a local browser session to automatically extract employer affiliations, job titles, and career footprints without paid API keys. <strong>If you do not log in, investigation results will be far more inaccurate</strong> and professional pivots will be missed.`;
+        }
+        if (proceedBtn) {
+            proceedBtn.innerHTML = `<span>Proceed Without Login (Inaccurate Results) &times;</span>`;
+        }
+    }
+
+    modal.style.display = "flex";
+    checkBridgeStatus(false);
+    if (window.SoundManager) window.SoundManager.play("alert");
+}
+
+function closeBridgeModal() {
+    const modal = document.getElementById("bridge-settings-modal");
+    if (modal) modal.style.display = "none";
+    stopBridgePolling();
+    if (window.SoundManager) window.SoundManager.play("click");
+}
+
+function chooseProceedWithoutLogin() {
+    closeBridgeModal();
+    showToast("⚠️ Proceeding in DEGRADED mode: Results will be far more inaccurate without LinkedIn.", "warning");
+    if (pendingInvestigationTarget) {
+        const t = pendingInvestigationTarget;
+        pendingInvestigationTarget = null;
+        executeInvestigation(t);
+    }
+}
+
+function closeBridgeModalWithWarning() {
+    chooseProceedWithoutLogin();
+}
+
+function handleBridgeBackdropClick(e) {
+    if (e.target.id === "bridge-settings-modal") {
+        chooseProceedWithoutLogin();
+    }
+}
+
+async function startBridgeLoginFlow() {
+    const pollingStatus = document.getElementById("bridge-login-polling-status");
+    const launchBtn = document.getElementById("btn-launch-bridge-login");
+    const noticeBox = document.getElementById("bridge-account-notice-box");
+
+    if (noticeBox) noticeBox.style.display = "none";
+    if (pollingStatus) {
+        pollingStatus.style.display = "block";
+        pollingStatus.innerHTML = `<span class="inline-block animate-spin mr-1">&#9696;</span> Launching dedicated local browser window...`;
+    }
+    if (launchBtn) launchBtn.disabled = true;
+
+    try {
+        const resp = await fetch("/api/bridge/login", { method: "POST" });
+        const res = await resp.json();
+        if (res.success) {
+            showToast("Browser window opened! Log in with LinkedIn or Sign in with Google.", "info");
+            if (pollingStatus) {
+                pollingStatus.innerHTML = `<span class="inline-block animate-spin mr-1">&#9696;</span> Browser active. Sign in with Google or your credentials in the opened window...`;
+            }
+            startBridgePolling();
+        } else {
+            showToast("Error launching browser: " + (res.error || "Unknown error"), "error");
+            if (pollingStatus) {
+                pollingStatus.innerText = "Failed: " + (res.error || "Could not launch browser");
+            }
+        }
+    } catch (e) {
+        showToast("Error communicating with bridge: " + e.message, "error");
+        if (pollingStatus) {
+            pollingStatus.innerText = "Error: " + e.message;
+        }
+    } finally {
+        if (launchBtn) launchBtn.disabled = false;
+    }
+}
+
+function startBridgePolling() {
+    stopBridgePolling();
+    bridgePollInterval = setInterval(async () => {
+        try {
+            const resp = await fetch("/api/bridge/status");
+            if (resp.ok) {
+                const data = await resp.json();
+                updateBridgeUI(data, false);
+                if (data.authenticated) {
+                    stopBridgePolling();
+                    showToast("LinkedIn Bridge Connected! Automated career scraping is active.", "success");
+                    if (window.SoundManager) window.SoundManager.play("victory");
+                    setTimeout(() => {
+                        closeBridgeModal();
+                        if (pendingInvestigationTarget) {
+                            const t = pendingInvestigationTarget;
+                            pendingInvestigationTarget = null;
+                            executeInvestigation(t);
+                        }
+                    }, 1200);
+                }
+            }
+        } catch (e) {}
+    }, 2000);
+}
+
+function stopBridgePolling() {
+    if (bridgePollInterval) {
+        clearInterval(bridgePollInterval);
+        bridgePollInterval = null;
+    }
+}
+
+function toggleManualCookieSection() {
+    const sec = document.getElementById("manual-cookie-section");
+    const caret = document.getElementById("manual-cookie-caret");
+    if (!sec) return;
+    const isHidden = sec.style.display === "none";
+    sec.style.display = isHidden ? "block" : "none";
+    if (caret) caret.innerHTML = isHidden ? "&uarr;" : "&darr;";
+}
+
+async function saveManualCookie() {
+    const input = document.getElementById("manual-li-at-input");
+    if (!input) return;
+    const val = input.value.trim();
+    try {
+        const resp = await fetch("/api/bridge/cookie", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cookie: val })
+        });
+        const res = await resp.json();
+        if (res.success) {
+            showToast(res.message, "success");
+            input.value = "";
+            const st = await checkBridgeStatus(false);
+            if (st && st.authenticated) {
+                setTimeout(() => {
+                    closeBridgeModal();
+                    if (pendingInvestigationTarget) {
+                        const t = pendingInvestigationTarget;
+                        pendingInvestigationTarget = null;
+                        executeInvestigation(t);
+                    }
+                }, 1000);
+            }
+        } else {
+            showToast(res.detail || "Error saving cookie", "error");
+        }
+    } catch (e) {
+        showToast("Network error: " + e.message, "error");
+    }
+}
+
+window.routeInvestigationWithBridgeCheck = routeInvestigationWithBridgeCheck;
+window.checkBridgeStatus = checkBridgeStatus;
+window.updateBridgeUI = updateBridgeUI;
+window.openBridgeModal = openBridgeModal;
+window.closeBridgeModal = closeBridgeModal;
+window.chooseProceedWithoutLogin = chooseProceedWithoutLogin;
+window.closeBridgeModalWithWarning = closeBridgeModalWithWarning;
+window.handleBridgeBackdropClick = handleBridgeBackdropClick;
+window.startBridgeLoginFlow = startBridgeLoginFlow;
+window.toggleManualCookieSection = toggleManualCookieSection;
+window.saveManualCookie = saveManualCookie;
+

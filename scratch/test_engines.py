@@ -1,31 +1,39 @@
-import urllib.request, urllib.parse, re
+from curl_cffi import requests
+import urllib.parse
+import re
 
-headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"}
+query = 'Alje Woltjer'
 
-print("--- Testing Startpage ---")
+# 1. Yahoo
 try:
-    url = "https://www.startpage.com/sp/search?query=" + urllib.parse.quote("Amir Secic")
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=5) as r:
-        html = r.read().decode("utf-8", errors="ignore")
-        print("Startpage len:", len(html))
-        # Look for result titles / links
-        links = re.findall(r'href="([^"]+)"[^>]*class="[^"]*result-link', html)
-        print("Startpage links found:", len(links), links[:3])
+    resp = requests.get(f'https://search.yahoo.com/search?p={urllib.parse.quote(query)}', impersonate='chrome124', timeout=5)
+    print('Yahoo status:', resp.status_code, 'len:', len(resp.text))
+    # Look for results
+    links = re.findall(r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', resp.text)
+    external = [h for h, t in links if 'linkedin' in h or 'vooruit' in h or 'merlon' in h]
+    print('Yahoo matches:', set(external[:5]))
 except Exception as e:
-    print("Startpage error:", e)
+    print('Yahoo error:', e)
 
-print("--- Testing Bing with explicit query ---")
+# 2. DuckDuckGo HTML
 try:
-    url = "https://www.bing.com/search?q=" + urllib.parse.quote('"Amir Secic"') + "&setlang=en"
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=5) as r:
-        html = r.read().decode("utf-8", errors="ignore")
-        blocks = re.findall(r'<li class="b_algo"[^>]*>([\s\S]*?)</li>', html)
-        print("Bing blocks for '\"Amir Secic\"':", len(blocks))
-        for b in blocks[:3]:
-            h2 = re.search(r'<h2[^>]*>([\s\S]*?)</h2>', b)
-            if h2:
-                print("  Bing title:", re.sub(r'<[^>]+>', '', h2.group(1)).strip()[:80])
+    resp = requests.post('https://html.duckduckgo.com/html/', data={'q': query}, impersonate='chrome124', timeout=5)
+    print('DDG status:', resp.status_code, 'len:', len(resp.text))
+    links = re.findall(r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', resp.text)
+    external = [h for h, t in links if 'uddg=' in h]
+    print('DDG count:', len(external))
+    for h in external[:5]:
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(h).query)
+        print('  DDG link:', qs.get('uddg', [h])[0])
 except Exception as e:
-    print("Bing error:", e)
+    print('DDG error:', e)
+
+# 3. Google
+try:
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'}
+    resp = requests.get(f'https://www.google.com/search?q={urllib.parse.quote(query)}', headers=headers, impersonate='chrome124', timeout=5)
+    print('Google status:', resp.status_code, 'len:', len(resp.text))
+    matches = re.findall(r'<a[^>]+href=["\'](/url\?q=[^"\'&]+|https://[^"\'&]+linkedin[^"\'&]+)["\']', resp.text)
+    print('Google matches:', matches[:5])
+except Exception as e:
+    print('Google error:', e)

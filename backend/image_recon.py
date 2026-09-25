@@ -106,10 +106,12 @@ def probe_github_avatar(handle: str, target_name: str = "", target_email: str = 
             gh_user = query_github_user(clean_handle)
             if gh_user:
                 tie = evaluate_account_tie(
-                    platform="GitHub",
-                    account_handle=clean_handle,
-                    account_real_name=gh_user.get("real_name") or "",
-                    account_bio=gh_user.get("bio") or "",
+                    account={
+                        "platform": "GitHub",
+                        "handle": clean_handle,
+                        "real_name": gh_user.get("real_name") or "",
+                        "bio": gh_user.get("bio") or "",
+                    },
                     target_name=target_name,
                     target_email=target_email
                 )
@@ -123,6 +125,11 @@ def probe_github_avatar(handle: str, target_name: str = "", target_email: str = 
         with urllib.request.urlopen(req, timeout=3.0) as resp:
             # Check content-type is image
             c_type = resp.headers.get("Content-Type", "")
+            c_len = int(resp.headers.get("Content-Length", 0))
+            # Reject GitHub default identicons (which are small geometric SVGs/PNGs under 2.5KB)
+            if c_len > 0 and c_len < 2500:
+                return None
+
             if resp.status == 200 and "image" in c_type:
                 return {
                     "platform": "GitHub",

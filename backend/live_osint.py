@@ -70,7 +70,7 @@ def check_email_with_holehe(email: str) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
-def check_email_with_user_scanner(email: str, timeout: int = 35) -> List[Dict[str, Any]]:
+def check_email_with_user_scanner(email: str, timeout: int = 10) -> List[Dict[str, Any]]:
     """
     Executes high-concurrency, non-blocking user-scanner OSINT checks across
     modern consumer, developer, entertainment, and social platforms.
@@ -96,8 +96,9 @@ def check_email_with_user_scanner(email: str, timeout: int = 35) -> List[Dict[st
             "user-scanner",
             "-e", clean_email,
             "--no-nsfw",
-            "-C", "40",
-            "-c", "community,dev,entertainment,gaming,music,other,social,learning",
+            "-C", "75",
+            "-t", "3",
+            "-c", "community,dev,gaming,social",
             "-f", "json",
             "-o", tmp_path
         ]
@@ -144,24 +145,9 @@ def check_email_with_user_scanner(email: str, timeout: int = 35) -> List[Dict[st
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-COMMON_GIVEN_NAMES = {
-    "jordin", "jordan", "alex", "alexander", "john", "david", "michael", "mike",
-    "chris", "christopher", "sarah", "emma", "daniel", "dan", "james", "filip",
-    "philip", "peter", "paul", "mark", "luke", "tom", "thomas", "tim", "timothy",
-    "sam", "samuel", "ben", "benjamin", "matt", "matthew", "andrew", "andy",
-    "robert", "bob", "brian", "kevin", "jason", "eric", "steven", "steve",
-    "richard", "rick", "william", "will", "bill", "anthony", "tony", "joseph", "joe",
-    "charles", "ryan", "nathan", "nate", "justin", "adam", "patrick", "sean",
-    "mateusz", "piotr", "krzysztof", "pawel", "michal", "jan", "jakub", "marcin",
-    "lars", "ole", "per", "knut", "erik", "sven", "magnus", "henrik", "jonas",
-    "anna", "maria", "elena", "laura", "julia", "sophie", "olivia", "emily"
-}
-
 def is_common_given_name(word: str) -> bool:
-    if not word:
-        return False
-    clean = re.sub(r'[^a-zA-Z]', '', word).lower()
-    return clean in COMMON_GIVEN_NAMES
+    """Universally neutral name check: zero hardcoded dictionaries or cultural bias."""
+    return False
 
 def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = None) -> List[str]:
     """
@@ -169,7 +155,7 @@ def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = 
     and from the target entity's real name when available.
     Works for any identity without hardcoding:
     - Example: 'alex.smith.99@yahoo.com' -> ['alex.smith', 'alexsmith', 'alex_smith', 'alexsmith99']
-    - Example: email '3gbxdd@gmail.com', name 'Amir Secic' -> ['amirsecic', 'amir.secic', 'amir_secic', 'asecic', '3gbxdd']
+    - Example: email 'alex.morgan@example.com', name 'Alex Morgan' -> ['alexmorgan', 'alex.morgan', 'alex_morgan', 'amorgan']
     """
     if not email_or_handle and not target_name:
         return []
@@ -205,6 +191,10 @@ def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = 
             add_candidate(fn[0] + "." + ln)
             add_candidate(fn[0] + "_" + ln)
             add_candidate(ln + fn[0])
+            if len(fn) >= 3:
+                add_candidate(fn)
+            if len(ln) >= 3:
+                add_candidate(ln)
             # Check for birthyear or suffix digits in local handle (e.g. 95 from 3gbxdd or alex95)
             digits_in_local = re.findall(r'\d+', local)
             for d_str in digits_in_local:
@@ -246,9 +236,9 @@ def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = 
         add_candidate(first[0] + last)
         add_candidate(first + last[0])
         add_candidate(last + first[0])
-        if len(first) >= 4 and is_common_given_name(first):
+        if len(first) >= 3:
             add_candidate(first)
-        if len(last) >= 4 and is_common_given_name(last):
+        if len(last) >= 3:
             add_candidate(last)
 
     # 7. Universal username suffixes and prefixes
@@ -259,6 +249,10 @@ def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = 
     for pre in ["the_", "the-", "the", "real_", "real-", "real", "iam_", "iam-", "iam"]:
         if local.startswith(pre) and len(local) - len(pre) >= 3:
             add_candidate(local[len(pre):].lstrip("._-"))
+
+    # 8. Vanity doubled final consonant (common on competitive/gaming networks when primary handle is occupied)
+    if len(local) >= 4 and local[-1].isalpha() and local[-1] not in "aeiou" and not local.endswith(local[-1] * 2):
+        add_candidate(local + local[-1])
 
     return candidates
 
@@ -575,12 +569,25 @@ def query_git_commit_archaeology(email: str) -> Dict[str, Any]:
     with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
         fetched_docs = [r for r in ex.map(fetch_candidate, candidate_fetches[:48]) if r]
 
+    def is_fictional_or_dummy_phone(intl_num: str) -> bool:
+        if not intl_num:
+            return True
+        clean = re.sub(r'\D', '', intl_num)
+        # Fictional North American 555 numbers (standard documentation/fictional reserved prefix)
+        if intl_num.startswith("+1") and re.search(r'\b\d{3}[-.\s]?555[-.\s]?\d{4}\b', intl_num):
+            return True
+        if len(set(clean)) <= 2:
+            return True
+        if clean.endswith("12345678") or clean.endswith("000000"):
+            return True
+        return False
+
     for full_name, candidate, text in fetched_docs:
         # Check explicit tel: hyperlinks (100% precision)
         tel_links = re.findall(r'href=[\'"]tel:([^\'"]+)[\'"]', text, re.IGNORECASE)
         for raw_tel in tel_links:
             telecom_info = analyze_telecom_number(raw_tel)
-            if telecom_info and not any(p["international"] == telecom_info["international"] for p in result["phones"]):
+            if telecom_info and not is_fictional_or_dummy_phone(telecom_info.get("international", "")) and not any(p["international"] == telecom_info["international"] for p in result["phones"]):
                 telecom_info["source"] = f"GitHub Public Repository ({full_name}/{candidate})"
                 telecom_info["confidence"] = 1.0
                 result["phones"].append(telecom_info)
@@ -634,18 +641,21 @@ def query_git_commit_archaeology(email: str) -> Dict[str, Any]:
             result["locations"].add(loc.strip())
 
         # If no explicit tel: link was found, search text using PhoneNumberMatcher
-        if not result["phones"]:
+        # Only search personal portfolio documents or author-owned repos to avoid scraping documentation dummy numbers
+        is_author_doc = any(r.get("full_name") == full_name and r.get("is_author_owned") for r in sorted_repos)
+        if not result["phones"] and (is_author_doc or candidate.lower() != "readme.md"):
             for region in ["NO", "PL", "US", "GB", "DE", None]:
                 try:
                     for match in phonenumbers.PhoneNumberMatcher(text, region):
                         num = match.number
                         if phonenumbers.is_valid_number(num):
                             intl = phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
-                            telecom_info = analyze_telecom_number(intl, region)
-                            if telecom_info and not any(p["international"] == telecom_info["international"] for p in result["phones"]):
-                                telecom_info["source"] = f"Repository Document ({full_name}/{candidate})"
-                                telecom_info["confidence"] = 0.85
-                                result["phones"].append(telecom_info)
+                            if not is_fictional_or_dummy_phone(intl):
+                                telecom_info = analyze_telecom_number(intl, region)
+                                if telecom_info and not any(p["international"] == telecom_info["international"] for p in result["phones"]):
+                                    telecom_info["source"] = f"Repository Document ({full_name}/{candidate})"
+                                    telecom_info["confidence"] = 0.85
+                                    result["phones"].append(telecom_info)
                 except Exception:
                     pass
 
@@ -1370,7 +1380,7 @@ def get_breach_circulation_intel(breach_name: str, exposed_fields: Optional[List
 def derive_full_names(email: str, author_names: Set[str], anchors: Optional[Dict[str, str]] = None) -> Set[str]:
     """
     Synthesizes human full names by combining Git commit author display names
-    with email address patterns (e.g. jordinzwaan2016@gmail.com + Jordin -> Jordin Zwaan).
+    with email address patterns (e.g. alex.morgan@example.com + Alex -> Alex Morgan).
     Also supports first.last and first_last email schemes.
     """
     names = set()
@@ -1386,7 +1396,7 @@ def derive_full_names(email: str, author_names: Set[str], anchors: Optional[Dict
     clean_local = email.split("@")[0].lower()
     clean_stem = re.sub(r'\d+$', '', clean_local)
     
-    # 1. Combine git single first name with email remainder (e.g. Jordin + zwaan2016 -> Jordin Zwaan)
+    # 1. Combine git single first name with email remainder (e.g. Alex + morgan -> Alex Morgan)
     for a in list(names):
         parts = a.strip().split()
         if len(parts) == 1:
@@ -1396,7 +1406,7 @@ def derive_full_names(email: str, author_names: Set[str], anchors: Optional[Dict
                 if len(sur) >= 2 and not sur.isdigit():
                     names.add(f"{parts[0].title()} {sur.title()}")
                     
-    # 2. Universal delimiter & internal digit splitting (e.g. yasir1kadhim -> Yasir Kadhim, john.smith -> John Smith)
+    # 2. Universal delimiter & internal digit splitting (e.g. alex1morgan -> Alex Morgan, john.smith -> John Smith)
     split_parts = [p for p in re.split(r'[._\-\+\d]+', clean_local) if len(p) >= 2]
     if len(split_parts) >= 2 and all(not p.isdigit() for p in split_parts):
         names.add(" ".join(p.title() for p in split_parts))
@@ -1411,39 +1421,16 @@ def derive_full_names(email: str, author_names: Set[str], anchors: Optional[Dict
         if len(pts) == 2 and all(len(p) >= 2 for p in pts) and not pts[1].isdigit():
             names.add(f"{pts[0].title()} {pts[1].title()}")
     else:
-        # 4. Compound handle splitting (e.g. jordinzwaan -> Jordin Zwaan, yasirkadhim -> Yasir Kadhim)
-        common_firsts = {
-            # Western & Anglo-American
-            "jordin", "jordan", "filip", "phillip", "philip", "alex", "alexander", "david",
-            "john", "michael", "mike", "lucas", "luka", "thomas", "daniel", "dan", "robert",
-            "peter", "mark", "kevin", "brian", "jason", "eric", "erik", "lisa", "anna",
-            "maria", "emma", "sophia", "olivia", "james", "william", "benjamin", "samuel",
-            "nathan", "niels", "lars", "sander", "stefan", "bram", "thijs", "daan", "tim",
-            "tom", "max", "ruben", "julian", "milan", "luuk", "mees", "gijs", "teun",
-            "adam", "oliver", "henry", "george", "charles", "richard", "joseph", "sam",
-            "paul", "steven", "anthony", "andrew", "edward", "harry", "jack", "noah",
-            # Middle Eastern & Arabic & Islamic
-            "yasir", "yasser", "ashraf", "kadim", "kadhim", "ali", "omar", "mohammed", "mohamed",
-            "muhammad", "ahmed", "ahmad", "hassan", "hussein", "tariq", "tarik", "kareem",
-            "karim", "mustafa", "mahmoud", "ibrahim", "youssef", "yousef", "bilal", "hamza",
-            "khalid", "walid", "ziad", "zaid", "samir", "rami", "nabil", "fadi", "amr",
-            # Slavic & Eastern European
-            "mateusz", "piotr", "krzysztof", "pawel", "michal", "jan", "jakub", "marcin",
-            "tomasz", "andrzej", "stanislaw", "wojciech", "lukasz", "grzegorz", "dmitry",
-            "alexei", "sergey", "ivan", "vladimir", "igor", "mikhail", "nikolay", "artem",
-            # Nordic & Scandinavian
-            "ole", "per", "knut", "sven", "magnus", "henrik", "jonas", "espen", "morten",
-            "bjorn", "tor", "geir", "rune", "arild", "frode", "oyvind", "einar",
-            # Southern European & Latin
-            "carlos", "luis", "juan", "miguel", "antonio", "pedro", "manuel", "jose",
-            "marco", "matteo", "luca", "francesco", "alessandro", "giovanni", "andrea"
-        }
-        for fn in sorted(common_firsts, key=lambda x: -len(x)):
-            if clean_stem.startswith(fn) and len(clean_stem) > len(fn) + 1:
-                sur = clean_stem[len(fn):]
-                if not sur.isdigit() and len(sur) >= 2 and sur not in ["os", "ek", "ik", "ka", "io", "ie", "y"]:
-                    names.add(f"{fn.title()} {sur.title()}")
-                    break
+        # 4. Universal Multilingual Onomastic Decomposition (Generic AI onomastics)
+        try:
+            from backend.identity_decomposer import decompose_target_identity
+            decomposed = decompose_target_identity(email)
+            if decomposed and decomposed.get("full_name"):
+                f_name = decomposed["full_name"].strip()
+                if len(f_name.split()) >= 2 and not decomposed.get("is_pseudonym"):
+                    names.add(f_name)
+        except Exception:
+            pass
 
     return names
 
@@ -1533,6 +1520,11 @@ def generate_osint_dorks(email: str, domain: str, discovered_names: Optional[Set
     name_dorks = []
     if best_name and len(best_name) >= 3:
         q_name = urllib.parse.quote(f'"{best_name}"')
+        name_parts = best_name.split()
+        first_name = name_parts[0] if name_parts else ""
+        is_freemail = any(d in clean_domain for d in ["gmail", "yahoo", "outlook", "hotmail", "proton", "icloud", "zoho", "mail", "live", "aol", "yandex"])
+        org_stem = clean_domain.split(".")[0].capitalize() if not is_freemail and "." in clean_domain else None
+
         name_dorks = [
             {
                 "category": "Social Graph",
@@ -1543,9 +1535,9 @@ def generate_osint_dorks(email: str, domain: str, discovered_names: Optional[Set
             },
             {
                 "category": "Open Web & Career",
-                "title": f"LinkedIn Dossier: {best_name}",
+                "title": f"LinkedIn Dossier: {best_name}" + (f" ({org_stem})" if org_stem else ""),
                 "description": f"Discovers verified LinkedIn profile, current corporate employer, and professional role for {best_name}.",
-                "url": f"https://www.google.com/search?q=site%3Alinkedin.com%2Fin+{q_name}",
+                "url": f"https://www.google.com/search?q=site%3Alinkedin.com%2Fin+{q_name}" + (f"+OR+%22{urllib.parse.quote(org_stem)}%22" if org_stem else ""),
                 "icon": "linkedin"
             },
             {
@@ -1577,6 +1569,14 @@ def generate_osint_dorks(email: str, domain: str, discovered_names: Optional[Set
                 "icon": "briefcase"
             }
         ]
+        # LinkedIn Internal Directory Search: Opens in authenticated desktop browser, never 404s, and immediately shows the target's verified role
+        name_dorks.insert(2, {
+            "category": "LinkedIn Network",
+            "title": f"LinkedIn Member Search: {best_name}" + (f" ({org_stem})" if org_stem else ""),
+            "description": f"Direct internal LinkedIn directory search for {best_name}" + (f" affiliated with {org_stem}." if org_stem else ".") + " Bypasses HTTP 999 scraping barriers via direct authenticated browser session.",
+            "url": f"https://www.linkedin.com/search/results/people/?keywords={urllib.parse.quote((best_name + ' ' + (org_stem or '')).strip())}",
+            "icon": "linkedin"
+        })
 
     dorks = [
         {
@@ -2244,7 +2244,11 @@ def check_platform_footprint(username: str, include_wmn: bool = True, wmn_limit:
 
     def probe_steam():
         try:
-            req = urllib.request.Request(f"https://steamcommunity.com/id/{clean_handle}/?xml=1", headers={"User-Agent": USER_AGENT})
+            if re.match(r'^\d{16,20}$', clean_handle):
+                url = f"https://steamcommunity.com/profiles/{clean_handle}/?xml=1"
+            else:
+                url = f"https://steamcommunity.com/id/{clean_handle}/?xml=1"
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(req, timeout=3.0) as res:
                 if res.status == 200:
                     raw = res.read().decode("utf-8", errors="ignore")
@@ -2253,14 +2257,18 @@ def check_platform_footprint(username: str, include_wmn: bool = True, wmn_limit:
                         root = ET.fromstring(raw)
                         steam_id_64 = root.findtext("steamID64")
                         persona_name = root.findtext("steamID") or clean_handle
-                        custom_url = root.findtext("customURL") or clean_handle
+                        custom_url = root.findtext("customURL")
                         avatar = root.findtext("avatarFull")
                         real_name = (root.findtext("realname") or "").strip()
                         location = (root.findtext("location") or "").strip()
                         summary = (root.findtext("summary") or "").strip()
                         state = root.findtext("onlineState") or "offline"
 
-                        ctx_parts = [f"SteamID64: {steam_id_64}", f"Persona: '{persona_name}'"]
+                        ctx_parts = []
+                        if steam_id_64:
+                            ctx_parts.append(f"SteamID64: {steam_id_64}")
+                        if persona_name:
+                            ctx_parts.append(f"Persona: '{persona_name}'")
                         if real_name:
                             ctx_parts.append(f"Real Name: {real_name}")
                         if location:
@@ -2268,22 +2276,33 @@ def check_platform_footprint(username: str, include_wmn: bool = True, wmn_limit:
                         if state and state != "offline":
                             ctx_parts.append(f"Status: {state.capitalize()}")
                         if summary:
-                            clean_sum = re.sub(r'<[^>]+>', '', summary)[:100]
+                            clean_sum = re.sub(r'<[^>]+>', ' ', summary).strip()[:100]
                             ctx_parts.append(f"Bio: {clean_sum}")
+
+                        final_url = f"https://steamcommunity.com/id/{custom_url}" if custom_url else (
+                            f"https://steamcommunity.com/profiles/{steam_id_64}" if steam_id_64 else f"https://steamcommunity.com/id/{clean_handle}"
+                        )
+
+                        is_short = len(clean_handle) <= 4 and not re.match(r'^\d+$', clean_handle)
+                        is_discordant = is_short and persona_name.lower() != clean_handle.lower()
 
                         return {
                             "platform": "Steam",
-                            "handle": clean_handle,
+                            "handle": custom_url or clean_handle,
                             "name": persona_name,
                             "persona_name": persona_name,
                             "custom_url": custom_url,
+                            "steam_id_64": steam_id_64,
                             "real_name": real_name,
                             "location": location,
                             "summary": summary,
-                            "profile_url": f"https://steamcommunity.com/id/{custom_url}",
+                            "profile_url": final_url,
+                            "url": final_url,
                             "avatar_url": avatar,
-                            "confidence": 0.95,
+                            "confidence": 0.50 if is_discordant else 0.95,
                             "category": "Gaming",
+                            "is_verified": not is_discordant,
+                            "is_suspected": is_discordant,
                             "context": "Active Steam Community gaming profile (" + " • ".join(ctx_parts) + ")"
                         }
         except Exception:
@@ -2495,17 +2514,21 @@ def corroborate_candidate_profile(
 
     # Multi-Signal Anchor Corroboration Check:
     # A profile is VERIFIED only if directly authenticated (email verified) or has matching ground-truth anchors.
-    # Targets with full names (e.g. 'Filip Niewiadomski', 'Yasir Kadhim') require multi-token verification (first + last name).
-    # Matching only a single common given name (e.g. 'Filip' in 'Filip Šebek') or a generic surname alone is strictly insufficient.
+    # Targets with full names (e.g. 'Alex Morgan', 'Jordan Vance') require multi-token verification (first + last name).
+    # Matching only a single generic given name or a generic surname alone is strictly insufficient.
     target_names_count = len(truth_corpus.get("names", set()))
     has_only_common_given_name = (len(matched_names) == 1 and any(is_common_given_name(m) for m in matched_names))
 
+    disp_name_low = (profile.get("name") or profile.get("persona_name") or "").lower()
+    known_tokens = truth_corpus.get("names", set()) | set(truth_corpus.get("handles", []))
+    is_persona_discordant = is_short_handle and bool(disp_name_low) and not any(t in disp_name_low for t in known_tokens if len(t) >= 3)
+
     if target_names_count >= 2:
-        has_strong_name_match = (len(matched_names) >= 2) or (
+        has_strong_name_match = not is_persona_discordant and ((len(matched_names) >= 2) or (
             len(matched_names) == 1 and not has_only_common_given_name and bool(matched_locs or provenance == "anchor")
-        )
+        ))
     else:
-        has_strong_name_match = len(matched_names) >= 1 and not has_only_common_given_name
+        has_strong_name_match = not is_persona_discordant and (len(matched_names) >= 1 and not has_only_common_given_name)
 
     custom_url_val = (profile.get("custom_url") or "").lower().strip()
     is_distinctive_handle = len(handle) >= 5 and not is_common_given_name(handle)
@@ -2619,6 +2642,9 @@ def extract_candidate_aliases_from_profile(profile: Dict[str, Any], known_handle
         # Match social URLs: e.g. twitter.com/fifi, steamcommunity.com/id/fifieusz, t.me/xyz
         for m in re.finditer(r'(?:twitter\.com|x\.com|github\.com|t\.me|instagram\.com|twitch\.tv|linktr\.ee)/([a-zA-Z0-9_\-\.]{3,25})', text_corpus, re.I):
             add_candidate(m.group(1), "bio_social_link")
+        # Match Steam community profiles: steamcommunity.com/id/xxx or steamcommunity.com/profiles/xxx
+        for m in re.finditer(r'steamcommunity\.com/(?:id|profiles)/([a-zA-Z0-9_\-\.]{3,35})', text_corpus, re.I):
+            add_candidate(m.group(1), "steam_profile_link")
         # Match explicit handle markers: e.g. discord: false, steam: fifi
         for m in re.finditer(r'(?:discord|steam|telegram|alias|aka|tag):\s*([a-zA-Z0-9_\-\.]{3,25})', text_corpus, re.I):
             add_candidate(m.group(1), "explicit_alias_marker")
@@ -2690,8 +2716,15 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
         "anchors_correlated": {}
     }
 
-    # 1. Execute Git Commit Archaeology (Primary real-world pivot source)
-    git_intel = query_git_commit_archaeology(clean_email)
+    # 1. Execute Git Commit Archaeology, User-Scanner & Holehe concurrently in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+        f_git = ex.submit(query_git_commit_archaeology, clean_email)
+        f_uscan = ex.submit(check_email_with_user_scanner, clean_email, 8)
+        f_hole = ex.submit(check_email_with_holehe, clean_email)
+        git_intel = f_git.result()
+        user_scanner_matches = f_uscan.result()
+        holehe_matches = f_hole.result()
+
     osint_report["education"] = git_intel.get("education", [])
     osint_report["workplace"] = git_intel.get("workplace", [])
     osint_report["flagship_projects"] = git_intel.get("flagship_projects", [])
@@ -2716,17 +2749,17 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
     digit_candidates = [n.strip() for n in osint_report["discovered_names"] if any(c.isdigit() for c in n)]
 
     for n in clean_candidates:
-        if " " in n and not is_common_given_name(n):
+        if " " in n:
             if not best_name or len(n) > len(best_name):
                 best_name = n
     if not best_name:
         for n in digit_candidates:
-            if " " in n and not is_common_given_name(n):
+            if " " in n:
                 if not best_name or len(n) > len(best_name):
                     best_name = n
     if not best_name and clean_candidates:
         for n in clean_candidates:
-            if len(n) > 2 and not is_common_given_name(n):
+            if len(n) > 2:
                 best_name = n
                 break
     osint_report["primary_name"] = best_name
@@ -2735,7 +2768,7 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
     for al in git_intel.get("author_logins", set()):
         initial_handles.add(al)
         for stem in derive_candidate_handles(al):
-            if len(stem) >= 4 and not is_common_given_name(stem):
+            if len(stem) >= 4:
                 initial_handles.add(stem)
     for loc in git_intel["locations"]:
         osint_report["discovered_locations"].add(loc)
@@ -2764,19 +2797,15 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
 
     # 2. Universal Multi-Platform Probing with user-scanner & Holehe (Quora, Pinterest, Dropbox, Apple, Wix, Office365, Spotify, Twitter/X, etc.)
     all_enum_matches = []
-    
-    # Primary: Modern user-scanner
-    user_scanner_matches = check_email_with_user_scanner(clean_email)
     if user_scanner_matches:
         all_enum_matches.extend(user_scanner_matches)
 
-    # Supplement with Holehe
-    holehe_matches = check_email_with_holehe(clean_email)
     seen_sites = {m.get("name", "").lower() for m in all_enum_matches if m.get("name")}
-    for hm in holehe_matches:
+    for hm in (holehe_matches or []):
         hname = (hm.get("name") or "").lower()
         if hname and hname not in seen_sites:
             seen_sites.add(hname)
+            all_enum_matches.append(hm)
             all_enum_matches.append(hm)
 
     for match in all_enum_matches:
@@ -2893,16 +2922,14 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
                     if not osint_report.get("primary_name") or (" " in r_name and " " not in osint_report["primary_name"]):
                         osint_report["primary_name"] = r_name
 
-            # STRICT GEOLOCATION CORROBORATION:
-            # Candidate platform accounts (e.g. Chess.com, Steam, Roblox) often belong to unrelated users with similar handles.
-            # Never blindly inject candidate locations into the target's physical footprints unless corroborated against
-            # known Nordic / Polish / Investigator regional anchors.
+            # GEOLOCATION CORROBORATION:
+            # Candidate platform accounts (e.g. Chess.com, Steam, Roblox) may belong to unrelated users.
+            # Only record candidate locations if corroborated against known regional anchors or prior verified locations.
             if loc:
                 loc_low = loc.lower()
-                is_anchor_matched = (
-                    any(anc in loc_low for anc in ["norway", "norge", "poland", "polska", "sarpsborg", "halden", "oslo", "fredrikstad"]) or
+                is_anchor_matched = bool(
                     (anchor_city and anchor_city.lower() in loc_low) or
-                    (dhit.get("is_verified") and "filip" in str(r_name or "").lower())
+                    any(l.lower() in loc_low for l in osint_report["discovered_locations"])
                 )
                 if is_anchor_matched:
                     osint_report["discovered_locations"].add(loc)
@@ -2928,7 +2955,7 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
                 target_city=anchors.get("known_city")
             )
 
-            # If the account has an explicit conflicting name (e.g. Afan Secic or Carlos Steve Garcia), REJECT it
+            # If the account has an explicit conflicting name (e.g. conflicting surname or distinct stranger), REJECT it
             if tie_eval.get("is_rejected"):
                 continue
 
@@ -3286,20 +3313,28 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
                 m[plat] = str(h).strip().lower()
         return m
 
-    # Probe platforms and execute Bayesian Entity Corroboration (Hop 1)
-    for idx, handle in enumerate(sorted_candidate_handles[:6]):
-        provenance = probe_handle_dict[handle]
-        probes = check_platform_footprint(handle, include_wmn=(idx < 2), wmn_limit=25)
+    # Probe platforms and execute Bayesian Entity Corroboration concurrently (Hop 1)
+    def _fetch_handle_probes(idx_handle_tup):
+        idx, h_val = idx_handle_tup
+        prov = probe_handle_dict[h_val]
+        pr_list = check_platform_footprint(h_val, include_wmn=(idx == 0), wmn_limit=20)
+        return h_val, prov, pr_list
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+        handle_results = list(ex.map(_fetch_handle_probes, list(enumerate(sorted_candidate_handles[:4]))))
+
+    for handle, provenance, probes in handle_results:
         for p in probes:
             plat_low = p.get("platform", "").lower()
             plat_norm = normalize_plat_key(p.get("platform", ""))
             cand_handle = (p.get("handle") or "").strip().lower()
             ver_handles = get_verified_handles_by_platform()
 
-            # CONFLICT SUPPRESSION: If this platform already has a verified profile with a known handle
-            # (e.g. GitHub is verified as sazeku123, or Steam is verified as sazeku),
-            # any probe for a different handle on this same platform is a conflict/stranger collision.
-            if plat_norm in ver_handles and ver_handles[plat_norm] != cand_handle:
+            # CONFLICT SUPPRESSION: Single-account identity networks (e.g. Keybase, Gravatar, primary GitHub)
+            # suppress stranger handle collisions. Multi-account platforms (Steam, Roblox, Chess.com, Twitch)
+            # permit secondary/alt profiles to be probed and evaluated holistically.
+            is_multi_acc_platform = plat_norm in ["steam", "roblox", "chess.com", "twitch", "gaming", "discord"]
+            if not is_multi_acc_platform and plat_norm in ver_handles and ver_handles[plat_norm] != cand_handle:
                 continue
 
             is_accepted, conf_score, reason, is_verified = corroborate_candidate_profile(p, truth_corpus, provenance)
@@ -3451,12 +3486,12 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
                 ver_handles = get_verified_handles_by_platform()
 
                 # 1. Never probe or record candidate on the platform from which the alias was harvested
-                # (e.g. Steam display persona 'Poes' from Steam @sazeku should never probe Steam!)
+                # (e.g. an in-game display name from a platform should never re-probe that platform)
                 if rp_plat_low == r_src_plat:
                     continue
 
                 # 2. Never probe or record candidate on a platform that already has a verified profile
-                # (e.g. GitHub already verified as sazeku123, so GitHub @Poes is a false collision!)
+                # (e.g. platform is already verified with an authentic account, so secondary persona probes are suppressed)
                 if rp_plat_low in ver_handles:
                     continue
 
@@ -3537,6 +3572,30 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
     anchor_city = (anchors.get("known_city") or "").strip()
     if anchor_city:
         osint_report["discovered_locations"].add(anchor_city)
+
+    # 7. High-Reasoning AI Candidate Verification & Quarantine Pass (Groq gpt-oss-120b / Gemini Flash)
+    try:
+        from backend.ai_correlator import ai_verify_and_quarantine_candidates
+        auth_handles = list(git_intel.get("author_logins", set())) or list(git_intel.get("handles", set()))
+        target_info = {
+            "email": clean_email,
+            "full_name": osint_report.get("primary_name") or known_name or (ident_info.get("full_name") if ident_info else None),
+            "primary_handles": list(initial_handles),
+            "locations": list(osint_report["discovered_locations"]),
+            "ground_truth_accounts": [
+                f"{p.get('platform')}: @{p.get('handle')}" if p.get('handle') else p.get('platform')
+                for p in osint_report["discovered_profiles"] if p.get("is_email_bound") or "GitHub" in p.get("platform", "")
+            ],
+            "authenticated_handles": auth_handles
+        }
+        all_candidates_pool = list(osint_report.get("discovered_profiles", [])) + list(osint_report.get("suspected_profiles", []))
+        if all_candidates_pool:
+            ver_eval, susp_eval, rej_eval = ai_verify_and_quarantine_candidates(target_info, all_candidates_pool)
+            if ver_eval or susp_eval:
+                osint_report["discovered_profiles"] = ver_eval
+                osint_report["suspected_profiles"] = susp_eval
+    except Exception as e:
+        print(f"[!] Live OSINT AI Verification pass error: {e}")
 
     # Convert sets to lists for JSON serialization
     osint_report["discovered_handles"] = list(osint_report["discovered_handles"])

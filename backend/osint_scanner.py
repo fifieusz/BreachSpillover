@@ -736,14 +736,29 @@ def ingest_breaches_to_profile(
     known_name = (anchors.get("known_name") or "").strip()
     if known_name:
         real_name = known_name
-    elif not is_pseudonym_target:
-        if osint_results.get("primary_name"):
-            real_name = osint_results["primary_name"]
-        elif osint_results.get("discovered_names"):
-            candidates = list(osint_results["discovered_names"])
-            clean_spaced = [c for c in candidates if " " in c and len(c) > 4 and not any(ch.isdigit() for c in c)]
+    else:
+        # Check if live OSINT found an authentic human name (Git commits, Gravatar, web footprint)
+        prim = (osint_results.get("primary_name") or "").strip()
+        if prim and len(prim) >= 3 and not any(ch.isdigit() for ch in prim):
+            real_name = prim
+        elif prim and not is_pseudonym_target:
+            real_name = prim
+
+        if not real_name and osint_results.get("discovered_names"):
+            candidates = [c.strip() for c in osint_results["discovered_names"] if c and c.strip()]
+            clean_spaced = [c for c in candidates if " " in c and len(c) > 4 and not any(ch.isdigit() for ch in c)]
             spaced = [c for c in candidates if " " in c and len(c) > 4]
-            real_name = clean_spaced[0] if clean_spaced else (spaced[0] if spaced else candidates[0])
+            if clean_spaced:
+                real_name = clean_spaced[0]
+            elif not is_pseudonym_target and spaced:
+                real_name = spaced[0]
+            elif not is_pseudonym_target and candidates:
+                real_name = candidates[0]
+
+        if not real_name and id_info.get("full_name") and not is_pseudonym_target:
+            real_name = id_info["full_name"]
+        elif not real_name and name and not any(w in name.lower() for w in ["specialist", "professional", "target user", "target"]):
+            real_name = name
 
     if real_name:
         cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (real_name, emp_id))
@@ -758,6 +773,20 @@ def ingest_breaches_to_profile(
             0.95,
             "Discovered via authentic OSINT profile corroboration and identity decomposition [STATUS: VERIFIED]"
         ))
+        # If target began as a pseudonym email, also record the pseudonym pivot so alias intelligence is preserved
+        if is_pseudonym_target:
+            p_handle = id_info.get("primary_handle") or clean_user
+            cursor.execute("""
+                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                emp_id,
+                None,
+                "PERSONA_PIVOT",
+                f"Online Pseudonym: @{p_handle}",
+                0.95,
+                f"Identified as target primary alias and handle stem [STATUS: VERIFIED]"
+            ))
     elif is_pseudonym_target:
         p_handle = id_info.get("primary_handle") or clean_user
         clean_name = id_info.get("full_name") or p_handle.capitalize()
@@ -858,7 +887,7 @@ def ingest_breaches_to_profile(
         import concurrent.futures
 
         def _probe_wmn_worker(handle_str: str):
-            return handle_str, enumerate_handle_wmn(handle_str, max_sites=40, priority_only=False)
+            return handle_str, enumerate_handle_wmn(handle_str, max_sites=25, priority_only=True)
 
         authentic_handles = set()
         if clean_user_low:
@@ -867,19 +896,17 @@ def ingest_breaches_to_profile(
             authentic_handles.add(anchors["known_username"].lower().strip())
         for gh in osint_results.get("discovered_handles", set()):
             gh_clean = gh.lower().strip(" .-_+")
-            if gh_clean and gh_clean not in ["filipos", "yasir"]:
+            if gh_clean:
                 authentic_handles.add(gh_clean)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as wmn_exec:
-            fut_map = {wmn_exec.submit(_probe_wmn_worker, ch): ch for ch in list(cand_handles)[:6]}
+            fut_map = {wmn_exec.submit(_probe_wmn_worker, ch): ch for ch in list(cand_handles)[:3]}
             for fut in concurrent.futures.as_completed(fut_map):
                 try:
                     ch, w_res = fut.result()
                     ch_low = ch.lower().strip(" .-_+")
                     is_authentic = ch_low in authentic_handles and len(ch_low) >= 6
-                    is_generic_stem = is_common_given_name(ch_low) or ch_low in [
-                        "filipos", "yasir", "alex", "john", "david", "michael", "fifi", "fifi987"
-                    ]
+                    is_generic_stem = len(ch_low) < 4
 
                     for wm in w_res.get("matches", []):
                         p_url = wm.get("url", "")
@@ -1013,7 +1040,7 @@ def ingest_breaches_to_profile(
         for img in img_records:
             img_u = img.get("image_url") or img.get("url")
             img_src = img.get("platform") or img.get("source", "Avatar")
-            if img_u:
+            if img_u and "profile-framedphoto" not in img_u:
                 cursor.execute("""
                     INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
                     VALUES (?, ?, ?, ?, ?, ?)
@@ -1073,31 +1100,94 @@ def ingest_breaches_to_profile(
                 # Ignore synthetic or false positive placeholders
                 if any(bad in company.lower() for bad in ["customs support", "corporate presence", "unassigned"]):
                     company = ""
-                if any(bad in role.lower() for bad in ["professional role", "unassigned"]):
+                if any(bad in role.lower() for bad in ["unassigned"]):
                     role = ""
                 if company or role:
+                    role_to_save = role or "Professional Role"
+                    domain_org = ""
+                    if email and "@" in email:
+                        d_stem = email.split("@")[-1].lower().split(".")[0].capitalize()
+                        if d_stem.lower() not in ["gmail", "outlook", "hotmail", "yahoo", "proton", "protonmail", "icloud"]:
+                            domain_org = d_stem
+                    dept_to_save = company or "Corporate Identity"
+                    if company and domain_org and domain_org.lower() != company.lower():
+                        dept_to_save = f"{company} • {domain_org}"
+                    elif not company and domain_org:
+                        dept_to_save = domain_org
+
                     cursor.execute(
                         "UPDATE employees SET job_title = ?, department = ? WHERE id = ?",
-                        (role, company, emp_id)
+                        (role_to_save, dept_to_save, emp_id)
                     )
-                    cursor.execute("""
-                        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (
-                        emp_id,
-                        None,
-                        "WORKPLACE",
-                        f"Employer: {company}" if company else f"Role: {role}",
-                        round(float(dork_intel.get("confidence_score", 0.90)), 2),
-                        f"{work_data.get('context', 'Identified via verified web dork reconnaissance')} [STATUS: VERIFIED]"
-                    ))
+                    if company:
+                        cursor.execute("""
+                            INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (
+                            emp_id,
+                            None,
+                            "WORKPLACE",
+                            f"Employer: {company}",
+                            round(float(dork_intel.get("confidence_score", 0.95)), 2),
+                            f"{work_data.get('context', 'Identified via verified OSINT reconnaissance')} [STATUS: VERIFIED]"
+                        ))
+                    if domain_org and domain_org.lower() != company.lower():
+                        cursor.execute("SELECT id FROM pivots WHERE employee_id = ? AND pivot_type = 'WORKPLACE' AND pivot_value LIKE ?", (emp_id, f"Employer: {domain_org}%"))
+                        if not cursor.fetchone():
+                            cursor.execute("""
+                                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (
+                                emp_id,
+                                None,
+                                "WORKPLACE",
+                                f"Employer: {domain_org}",
+                                0.95,
+                                f"Corporate domain & entity affiliation tied to target domain [STATUS: VERIFIED]"
+                            ))
+                    if role:
+                        role_str = f"Role: {role} at {company}" if company else f"Role: {role}"
+                        cursor.execute("""
+                            INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (
+                            emp_id,
+                            None,
+                            "WORKPLACE",
+                            role_str,
+                            round(float(dork_intel.get("confidence_score", 0.95)), 2),
+                            f"Verified executive/professional position: {role} • {work_data.get('headline', role)} [STATUS: VERIFIED]"
+                        ))
+                    # Handle multiple verified affiliations (e.g. domain corporate registry + active LinkedIn employer)
+                    for aff_c in work_data.get("affiliated_companies", []):
+                        aff_clean = aff_c.strip()
+                        if aff_clean and aff_clean.lower() != company.lower():
+                            cursor.execute("""
+                                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (
+                                emp_id,
+                                None,
+                                "WORKPLACE",
+                                f"Employer: {aff_clean}",
+                                0.90,
+                                f"Secondary corporate entity affiliation tied to target domain [STATUS: VERIFIED]"
+                            ))
 
-            # Promote richer verified full name candidate (e.g. Yasir Ashraf Kadim) if corroborated
+            # Promote richer verified full name candidate (e.g. multi-token expanded legal name) if corroborated
             cand_name = dork_intel.get("full_name_candidate")
             if cand_name and len(cand_name.strip()) > 3:
                 c_parts = [p.lower() for p in cand_name.strip().split()]
                 curr_parts = [p.lower() for p in (real_name or name or "").strip().split()]
-                if len(c_parts) > len(curr_parts) and any(cp in c_parts for cp in curr_parts if len(cp) >= 3):
+                curr_has_digits = any(ch.isdigit() for ch in (real_name or name or ""))
+                cand_has_digits = any(ch.isdigit() for ch in cand_name)
+                should_promote = False
+                if not cand_has_digits and len(c_parts) >= 2:
+                    if curr_has_digits:
+                        should_promote = True
+                    elif len(c_parts) > len(curr_parts) and any(cp in c_parts for cp in curr_parts if len(cp) >= 3):
+                        should_promote = True
+                if should_promote:
                     cursor.execute("UPDATE employees SET full_name = ? WHERE id = ?", (cand_name.strip(), emp_id))
                     cursor.execute("""
                         INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
@@ -1135,20 +1225,307 @@ def ingest_breaches_to_profile(
                 h = prof.get("handle") or target_name_to_query
                 if "facebook" in plat.lower() or "facebook.com" in u.lower():
                     has_fb_profile = True
-                cursor.execute("""
-                    INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    emp_id,
-                    None,
-                    "PUBLIC_PROFILE",
-                    f"{plat}: {h}",
-                    round(float(dork_intel.get("confidence_score", 0.90)), 2),
-                    f"{prof.get('context', 'Public profile located via OSINT dork')} [URL: {u}] [STATUS: VERIFIED]"
-                ))
+
+                is_susp = prof.get("is_suspected", False) or not prof.get("is_verified", True)
+                conf = prof.get("confidence", 0.75 if is_susp else round(float(dork_intel.get("confidence_score", 0.90)), 2))
+                ctx_note = prof.get('context', 'Public profile located via OSINT dork')
+
+                if is_susp:
+                    if not any(sp.get("url") == u for sp in osint_results.setdefault("suspected_profiles", [])):
+                        osint_results["suspected_profiles"].append({
+                            "platform": plat,
+                            "handle": h,
+                            "url": u,
+                            "profile_url": u,
+                            "confidence": conf,
+                            "context": ctx_note,
+                            "is_verified": False,
+                            "is_suspected": True
+                        })
+                else:
+                    if not any(dp.get("url") == u for dp in osint_results.setdefault("discovered_profiles", [])):
+                        osint_results["discovered_profiles"].append({
+                            "platform": plat,
+                            "handle": h,
+                            "url": u,
+                            "profile_url": u,
+                            "confidence": conf,
+                            "context": ctx_note,
+                            "is_verified": True
+                        })
 
     except Exception as e:
         print(f"[!] AI Web Dork Recon error: {e}")
+
+    # 1a-3. Hybrid Waterfall Engine: LinkedIn Deep Timeline & Face Enrichment
+    # Tier 1 (External Unblocker / Direct) -> Tier 2 (Targeted Local Headless Browser Fallback)
+    try:
+        candidate_li_urls = []
+        all_candidate_urls = []
+        for prof in osint_results.get("discovered_profiles", []) + osint_results.get("suspected_profiles", []):
+            pu = prof.get("url", "")
+            if "linkedin.com/in/" in pu and pu not in candidate_li_urls:
+                candidate_li_urls.append(pu)
+            for cu in prof.get("candidate_urls", []):
+                if "linkedin.com/in/" in cu and cu not in all_candidate_urls:
+                    all_candidate_urls.append(cu)
+
+        # Ensure all candidate vanity variations are present
+        try:
+            from backend.linkedin_recon import derive_linkedin_candidate_slugs
+            for s in derive_linkedin_candidate_slugs(real_name or name, email):
+                su = f"https://www.linkedin.com/in/{s}/"
+                if su not in candidate_li_urls:
+                    candidate_li_urls.append(su)
+                if su not in all_candidate_urls:
+                    all_candidate_urls.append(su)
+        except Exception:
+            pass
+
+        from backend.unblocker_client import resolve_unblocker_config, unblock_and_enrich_target_profile
+        from backend.browser_runner import auto_enrich_target_from_browser, is_browser_authenticated
+
+        unblocker_cfg = resolve_unblocker_config()
+        has_api_key = bool(unblocker_cfg.get("api_key"))
+        auth_status = is_browser_authenticated()
+        has_local_browser = bool(auth_status.get("authenticated"))
+
+        enriched = False
+        dead_404_urls = set()
+
+        from backend.linkedin_recon import is_linkedin_identity_match
+
+        for target_li_url in (candidate_li_urls or [])[:5]:
+            enrichment_result = None
+
+            # Step 1: If Unblocker API key configured, attempt Tier 1 external unblock
+            if has_api_key:
+                try:
+                    res = unblock_and_enrich_target_profile(
+                        target_li_url,
+                        target_email=email,
+                        target_name=real_name or name
+                    )
+                    if res and res.get("success"):
+                        sc_check = res.get("parsed") or res.get("scraped") or {}
+                        if is_linkedin_identity_match(sc_check, real_name or name, email):
+                            enrichment_result = res
+                        else:
+                            print(f"[*] Tier 1 rejected LinkedIn collision: {sc_check.get('full_name')} does not match {real_name or name}")
+                except Exception as e:
+                    print(f"[!] Tier 1 unblocker attempt error: {e}")
+
+            # Step 2: Tier 2 Local Browser Runner (executes if Tier 1 failed, returned 401/404, or unconfigured)
+            if not enrichment_result and has_local_browser:
+                try:
+                    b_res = auto_enrich_target_from_browser(
+                        target_li_url,
+                        target_email=email,
+                        target_name=real_name or name,
+                        candidate_urls=all_candidate_urls,
+                        persist_to_db=False
+                    )
+                    if b_res and b_res.get("dead_urls"):
+                        dead_404_urls.update(b_res["dead_urls"])
+                    if b_res and b_res.get("success"):
+                        sc_check = b_res.get("scraped") or b_res.get("parsed") or {}
+                        if is_linkedin_identity_match(sc_check, real_name or name, email):
+                            enrichment_result = b_res
+                        else:
+                            print(f"[*] Tier 2 rejected LinkedIn collision: {sc_check.get('full_name')} does not match {real_name or name}")
+                except Exception as e:
+                    print(f"[!] Tier 2 local browser attempt error: {e}")
+
+            # Unified Ingestion Handler for ANY successful enrichment (Tier 1 or Tier 2)
+            if enrichment_result and enrichment_result.get("success"):
+                sc = enrichment_result.get("scraped") or enrichment_result.get("parsed") or {}
+                if not is_linkedin_identity_match(sc, real_name or name, email):
+                    continue
+                enriched = True
+                verified_url = enrichment_result.get("profile_url") or target_li_url
+                sc = enrichment_result.get("scraped") or {}
+                headline = sc.get("headline") or enrichment_result.get("headline") or "Professional Role"
+                current_company = sc.get("current_company") or enrichment_result.get("current_company") or "Corporate Identity"
+                avatar_pic = sc.get("profile_picture_url") or sc.get("avatar_url") or enrichment_result.get("profile_picture_url") or enrichment_result.get("avatar_url")
+                if avatar_pic and "profile-framedphoto" in avatar_pic:
+                    avatar_pic = None
+                loc = sc.get("location") or enrichment_result.get("location")
+                exp_list = sc.get("experience", []) or enrichment_result.get("experience", []) or enrichment_result.get("experiences", [])
+
+                # 1. Update employee table directly, keeping both workplaces in department
+                cursor.execute("SELECT corporate_email, department FROM employees WHERE id = ?", (emp_id,))
+                emp_row = cursor.fetchone()
+                corp_mail = emp_row[0] if emp_row and emp_row[0] else email
+                existing_dept = emp_row[1] if emp_row and emp_row[1] else ""
+
+                domain_org = ""
+                if corp_mail and "@" in corp_mail:
+                    d_host = corp_mail.split("@")[-1].lower()
+                    d_stem = d_host.split(".")[0].capitalize()
+                    if d_stem.lower() not in ["gmail", "outlook", "hotmail", "yahoo", "proton", "protonmail", "icloud"]:
+                        domain_org = d_stem
+
+                combined_dept = current_company
+                if domain_org and domain_org.lower() != current_company.lower():
+                    combined_dept = f"{current_company} • {domain_org}"
+                elif existing_dept and existing_dept.lower() != current_company.lower() and "corporate identity" not in existing_dept.lower():
+                    parts = [p.strip() for p in existing_dept.split("•") if p.strip()]
+                    if current_company not in parts:
+                        combined_dept = f"{current_company} • {parts[0]}"
+
+                emp_updates = ["job_title = ?", "department = ?"]
+                emp_params = [headline, combined_dept]
+                if avatar_pic:
+                    emp_updates.append("avatar_seed = ?")
+                    emp_params.append(avatar_pic)
+                emp_params.append(emp_id)
+                cursor.execute(f"UPDATE employees SET {', '.join(emp_updates)} WHERE id = ?", tuple(emp_params))
+
+                # 2. Only remove duplicate entries for this specific company / role; do NOT wipe out existing workplace affiliations (e.g. Vooruit)!
+                cursor.execute("""
+                    DELETE FROM pivots 
+                    WHERE employee_id = ? 
+                      AND pivot_type = 'WORKPLACE'
+                      AND (pivot_value = ? OR pivot_value LIKE ?)
+                """, (emp_id, f"Employer: {current_company}", f"Role:%{current_company}%"))
+
+                # 3. Insert authentic workplace pivots
+                cursor.execute("""
+                    INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                    VALUES (?, NULL, 'WORKPLACE', ?, 0.99, ?)
+                """, (
+                    emp_id,
+                    f"Employer: {current_company}",
+                    f"Current verified corporate organization: {current_company} • Role: {headline} [STATUS: VERIFIED]"
+                ))
+                if headline and headline.lower() != "professional role":
+                    cursor.execute("""
+                        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                        VALUES (?, NULL, 'WORKPLACE', ?, 0.98, ?)
+                    """, (
+                        emp_id,
+                        f"Role: {headline} at {current_company}",
+                        f"Verified executive/specialist role: {headline} [STATUS: VERIFIED]"
+                    ))
+
+                # Corroborate domain workplace pivot if distinct
+                if domain_org and domain_org.lower() != current_company.lower():
+                    cursor.execute("SELECT id FROM pivots WHERE employee_id = ? AND pivot_type = 'WORKPLACE' AND pivot_value LIKE ?", (emp_id, f"Employer: {domain_org}%"))
+                    if not cursor.fetchone():
+                        cursor.execute("""
+                            INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                            VALUES (?, NULL, 'WORKPLACE', ?, 0.95, ?)
+                        """, (
+                            emp_id,
+                            f"Employer: {domain_org}",
+                            f"Corporate domain & entity affiliation tied to {corp_mail} [STATUS: VERIFIED]"
+                        ))
+
+                # 4. Ingest career timeline and any additional workplace experiences
+                for exp in exp_list:
+                    role = exp.get("role") or exp.get("title") or "Role"
+                    comp = exp.get("company") or "Company"
+                    dur = exp.get("duration") or exp.get("period") or "Historical"
+                    cursor.execute("""
+                        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                        VALUES (?, NULL, 'TIMELINE', ?, 0.95, ?)
+                    """, (
+                        emp_id,
+                        f"{dur}: {role} at {comp}",
+                        f"Career experience verified via LinkedIn [Category: Career] [STATUS: VERIFIED]"
+                    ))
+                    if comp and comp.lower() != current_company.lower():
+                        cursor.execute("SELECT id FROM pivots WHERE employee_id = ? AND pivot_type = 'WORKPLACE' AND pivot_value LIKE ?", (emp_id, f"Employer: {comp}%"))
+                        if not cursor.fetchone():
+                            cursor.execute("""
+                                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                                VALUES (?, NULL, 'WORKPLACE', ?, 0.92, ?)
+                            """, (
+                                emp_id,
+                                f"Employer: {comp} ({role})",
+                                f"Career affiliation verified from LinkedIn: {role} ({dur}) [STATUS: VERIFIED]"
+                            ))
+
+                # 5. Ingest verified avatar (only authentic displayphoto, purge framedphoto)
+                cursor.execute("""
+                    DELETE FROM pivots
+                    WHERE employee_id = ? 
+                      AND pivot_type = 'AVATAR_CORRELATION'
+                      AND (pivot_value LIKE '%profile-framedphoto%' OR context_note LIKE '%profile-framedphoto%')
+                """, (emp_id,))
+                if avatar_pic and "profile-framedphoto" not in avatar_pic:
+                    cursor.execute("""
+                        DELETE FROM pivots
+                        WHERE employee_id = ? 
+                          AND pivot_type = 'AVATAR_CORRELATION'
+                          AND (pivot_value LIKE '%LinkedIn Avatar%' OR context_note LIKE '%LinkedIn%')
+                    """, (emp_id,))
+                    cursor.execute("""
+                        INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                        VALUES (?, NULL, 'AVATAR_CORRELATION', ?, 0.98, ?)
+                    """, (
+                        emp_id,
+                        f"LinkedIn Avatar: {avatar_pic}",
+                        f"High-resolution verified profile photo from LinkedIn [URL: {avatar_pic}] [STATUS: VERIFIED]"
+                    ))
+
+                # 6. Ingest location
+                if loc:
+                    loc_geo = resolve_global_location(loc)
+                    cursor.execute("""
+                        INSERT INTO physical_footprints (employee_id, source_leak_id, address_line, city, postal_code, country, latitude, longitude, exposure_type)
+                        VALUES (?, NULL, 'LinkedIn Registered Location', ?, ?, ?, ?, ?, 'PUBLIC_PROFILE_GEO')
+                    """, (
+                        emp_id,
+                        loc_geo.get("city", loc),
+                        loc_geo.get("postal_code", "N/A"),
+                        loc_geo.get("country", "International"),
+                        loc_geo.get("latitude"),
+                        loc_geo.get("longitude")
+                    ))
+
+                if verified_url:
+                    clean_ver_url = verified_url.rstrip("/")
+                    slug = clean_ver_url.split("/")[-1]
+                    osint_results.setdefault("discovered_profiles", []).append({
+                        "platform": "LinkedIn",
+                        "url": verified_url,
+                        "handle": slug,
+                        "name": real_name or name,
+                        "job_title": headline,
+                        "company": current_company,
+                        "is_verified": True,
+                        "is_suspected": False,
+                        "confidence": 0.99,
+                        "context": f"Verified LinkedIn Profile ({current_company}) via Hybrid Waterfall [STATUS: VERIFIED]"
+                    })
+                break
+
+        # Safety Layer: Purge all confirmed 404 dead links
+        if dead_404_urls:
+            osint_results["discovered_profiles"] = [
+                p for p in osint_results.get("discovered_profiles", [])
+                if p.get("url") not in dead_404_urls and (p.get("url", "").rstrip("/") + "/") not in dead_404_urls
+            ]
+            osint_results["suspected_profiles"] = [
+                p for p in osint_results.get("suspected_profiles", [])
+                if p.get("url") not in dead_404_urls and (p.get("url", "").rstrip("/") + "/") not in dead_404_urls
+            ]
+            for d_u in dead_404_urls:
+                cursor.execute("DELETE FROM pivots WHERE employee_id = ? AND pivot_value LIKE ?", (emp_id, f"%{d_u}%"))
+
+        if enriched:
+            cursor.execute("SELECT job_title, department FROM employees WHERE id = ?", (emp_id,))
+            updated_emp = cursor.fetchone()
+            if updated_emp:
+                pass
+            # Remove any candidate LinkedIn profiles from suspected_profiles so they are not quarantined
+            osint_results["suspected_profiles"] = [
+                p for p in osint_results.get("suspected_profiles", [])
+                if p.get("platform", "").lower() != "linkedin"
+            ]
+    except Exception as e:
+        print(f"[!] Hybrid Waterfall LinkedIn enrichment error: {e}")
 
     # 1b. Insert Discovered Public Profiles as Pivots
     for prof in osint_results.get("discovered_profiles", []):
@@ -1223,7 +1600,7 @@ def ingest_breaches_to_profile(
         h_low = (handle_val or "").strip().lower()
 
         # Suppress phantom candidate profiles if the platform already has a verified profile
-        if plat_low in verified_platforms_with_handles and verified_platforms_with_handles[plat_low] != h_low:
+        if plat_low in verified_platforms_with_handles:
             continue
         name_val = prof.get("name")
         persona_val = prof.get("persona_name")
@@ -1321,17 +1698,24 @@ def ingest_breaches_to_profile(
         ))
 
     for work in osint_results.get("workplace", []):
-        cursor.execute("""
-            INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            emp_id,
-            None,
-            "WORKPLACE",
-            f"Employer: {work['employer']}",
-            0.95,
-            f"Role: {work['role']} ({work['period']}) [Professional Experience]"
-        ))
+        emp_cand = (work.get("employer") or "").strip()
+        role_cand = (work.get("role") or "").strip()
+        period_cand = work.get("period") or "Professional Experience"
+        if not emp_cand:
+            continue
+        cursor.execute("SELECT id FROM pivots WHERE employee_id = ? AND pivot_type = 'WORKPLACE' AND pivot_value = ?", (emp_id, f"Employer: {emp_cand}"))
+        if not cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO pivots (employee_id, source_leak_id, pivot_type, pivot_value, confidence_score, context_note)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                emp_id,
+                None,
+                "WORKPLACE",
+                f"Employer: {emp_cand}",
+                0.95,
+                f"Role: {role_cand} ({period_cand}) [STATUS: VERIFIED]"
+            ))
 
     for proj in osint_results.get("flagship_projects", []):
         cursor.execute("""
