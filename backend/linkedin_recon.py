@@ -98,6 +98,9 @@ def derive_linkedin_candidate_slugs(target_name: str, email: Optional[str] = Non
             slugs.append(f"{first}-{last}")
         if f"{first}{last}" not in slugs:
             slugs.append(f"{first}{last}")
+        # Prioritize distinctive first name vanity (e.g. /in/alje/) early in candidate list
+        if len(first) >= 3 and first not in slugs:
+            slugs.append(first)
         if f"{first}_{last}" not in slugs:
             slugs.append(f"{first}_{last}")
 
@@ -425,6 +428,46 @@ def verify_linkedin_vanity_slug(
                                 "duration": period_str
                             })
 
+            # Extract education from Voyager response
+            educations = []
+            top_edu = ""
+            edu_groups = data.get("educationView", {}).get("elements", [])
+            for eg in edu_groups:
+                s_name = eg.get("schoolName") or eg.get("school", {}).get("name") or ""
+                d_name = eg.get("degreeName") or "Degree Program"
+                time_p = eg.get("timePeriod", {})
+                start_yr = time_p.get("startDate", {}).get("year", "")
+                end_yr = time_p.get("endDate", {}).get("year", "")
+                period_str = f"{start_yr} - {end_yr}" if (start_yr and end_yr) else (str(end_yr or start_yr) if (start_yr or end_yr) else "Alumni")
+                if s_name:
+                    if not top_edu:
+                        top_edu = s_name
+                    educations.append({
+                        "institution": s_name,
+                        "degree": d_name,
+                        "duration": period_str,
+                        "raw": f"{s_name} • {d_name}"
+                    })
+
+            if not educations and "included" in data:
+                for inc in data.get("included", []):
+                    if "Education" in inc.get("$type", ""):
+                        s_name = inc.get("schoolName") or inc.get("school", {}).get("name") or ""
+                        d_name = inc.get("degreeName") or "Degree Program"
+                        time_p = inc.get("dateRange", {}) or inc.get("timePeriod", {})
+                        start_yr = time_p.get("start", {}).get("year") or time_p.get("startDate", {}).get("year", "")
+                        end_yr = time_p.get("end", {}).get("year") or time_p.get("endDate", {}).get("year", "")
+                        period_str = f"{start_yr} - {end_yr}" if (start_yr and end_yr) else (str(end_yr or start_yr) if (start_yr or end_yr) else "Alumni")
+                        if s_name:
+                            if not top_edu:
+                                top_edu = s_name
+                            educations.append({
+                                "institution": s_name,
+                                "degree": d_name,
+                                "duration": period_str,
+                                "raw": f"{s_name} • {d_name}"
+                            })
+
             return {
                 "platform": "LinkedIn",
                 "url": f"https://www.linkedin.com/in/{clean_slug}/",
@@ -435,6 +478,8 @@ def verify_linkedin_vanity_slug(
                 "location": loc,
                 "context": f"Verified LinkedIn Profile - {headline} ({loc})",
                 "experience": positions,
+                "education": educations,
+                "top_education": top_edu,
                 "is_verified": True,
                 "is_suspected": False,
                 "confidence": 0.98

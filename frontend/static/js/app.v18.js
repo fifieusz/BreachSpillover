@@ -352,6 +352,9 @@ window.toggleSoundEffects = function () {
     }
     return next;
 };
+window.toggleSFX = function () {
+    return window.toggleSoundEffects();
+};
 
 // Immediate Tactile Click Feedback on pointerdown (0ms physical press response)
 window.addEventListener("pointerdown", (e) => {
@@ -379,10 +382,16 @@ window.addEventListener("pointerdown", (e) => {
 // Preload buffers on initial DOM readiness or first touch
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
-        if (window.sfx) window.sfx.init();
+        if (window.sfx) {
+            window.sfx.init();
+            window.sfx.updateButtonUI();
+        }
     });
 } else {
-    if (window.sfx) window.sfx.init();
+    if (window.sfx) {
+        window.sfx.init();
+        window.sfx.updateButtonUI();
+    }
 }
 
 /* ==========================================================================
@@ -421,7 +430,9 @@ const DARK_GRAPH_GROUPS = {
     pivot_semantic: { ...BOX_PROPS, color: { background: "#082f49", border: "#0ea5e9", highlight: { border: "#7dd3fc", background: "#0c3d5e" } }, font: { color: "#7dd3fc", face: "JetBrains Mono" } },
     domain: { ...BOX_PROPS, color: { background: "#1e1b4b", border: "#8b5cf6", highlight: { border: "#a78bfa", background: "#2a2663" } }, font: { color: "#a78bfa", face: "JetBrains Mono" } },
     subdomain: { ...BOX_PROPS, color: { background: "#1e1b4b", border: "#8b5cf6", highlight: { border: "#a78bfa", background: "#2a2663" } }, font: { color: "#a78bfa", face: "JetBrains Mono" } },
-    correlated_identity: { ...BOX_PROPS, color: { background: "#300a12", border: "#f43f5e", highlight: { border: "#fda4af", background: "#42101b" } }, font: { color: "#fecdd3", face: "JetBrains Mono" } }
+    correlated_identity: { ...BOX_PROPS, color: { background: "#300a12", border: "#f43f5e", highlight: { border: "#fda4af", background: "#42101b" } }, font: { color: "#fecdd3", face: "JetBrains Mono" } },
+    candidate_cluster: { ...BOX_PROPS, color: { background: "#271202", border: "#f59e0b", highlight: { border: "#fde047", background: "#3b1d05" } }, font: { color: "#fde68a", face: "JetBrains Mono", size: 10, bold: true }, borderWidth: 2, borderDashes: [4, 4] },
+    candidate_account: { ...BOX_PROPS, color: { background: "#1c1407", border: "#f59e0b", highlight: { border: "#fde047", background: "#2e210b" } }, font: { color: "#fde68a", face: "JetBrains Mono", size: 10, bold: true }, borderWidth: 1.5, borderDashes: [3, 3] }
 };
 
 const LIGHT_GRAPH_GROUPS = {
@@ -449,7 +460,9 @@ const LIGHT_GRAPH_GROUPS = {
     pivot_semantic: { ...BOX_PROPS, color: { background: "#E0F2FE", border: "#0284C7", highlight: { border: "#0369A1", background: "#BAE6FD" } }, font: { color: "#0369A1", face: "JetBrains Mono" } },
     domain: { ...BOX_PROPS, color: { background: "#EDE9FE", border: "#7C3AED", highlight: { border: "#5B21B6", background: "#DDD6FE" } }, font: { color: "#5B21B6", face: "JetBrains Mono" } },
     subdomain: { ...BOX_PROPS, color: { background: "#EDE9FE", border: "#7C3AED", highlight: { border: "#5B21B6", background: "#DDD6FE" } }, font: { color: "#5B21B6", face: "JetBrains Mono" } },
-    correlated_identity: { ...BOX_PROPS, color: { background: "#FFE4E6", border: "#E11D48", highlight: { border: "#9F1239", background: "#FECDD3" } }, font: { color: "#9F1239", face: "JetBrains Mono" } }
+    correlated_identity: { ...BOX_PROPS, color: { background: "#FFE4E6", border: "#E11D48", highlight: { border: "#9F1239", background: "#FECDD3" } }, font: { color: "#9F1239", face: "JetBrains Mono" } },
+    candidate_cluster: { ...BOX_PROPS, color: { background: "#FEF3C7", border: "#D97706", highlight: { border: "#B45309", background: "#FDE68A" } }, font: { color: "#92400E", face: "JetBrains Mono", size: 10, bold: true }, borderWidth: 2, borderDashes: [4, 4] },
+    candidate_account: { ...BOX_PROPS, color: { background: "#FFFBEB", border: "#F59E0B", highlight: { border: "#B45309", background: "#FEF3C7" } }, font: { color: "#B45309", face: "JetBrains Mono", size: 10, bold: true }, borderWidth: 1.5, borderDashes: [3, 3] }
 };
 
 function isCurrentThemeLight() {
@@ -633,6 +646,7 @@ function updateSearchInputTypeBadge() {
     if (!val) {
         badge.className = "search-type-badge font-mono";
         badge.innerText = "[STANDBY: AUTO-DETECT]";
+        badge.removeAttribute("style");
         return;
     }
 
@@ -640,42 +654,102 @@ function updateSearchInputTypeBadge() {
     if (/^[a-fA-F0-9]{32}$/.test(val)) {
         badge.className = "search-type-badge type-hash font-mono";
         badge.innerText = "[HASH: MD5]";
+        badge.removeAttribute("style");
         return;
     }
     if (/^[a-fA-F0-9]{40}$/.test(val)) {
         badge.className = "search-type-badge type-hash font-mono";
         badge.innerText = "[HASH: SHA-1]";
+        badge.removeAttribute("style");
         return;
     }
     if (/^[a-fA-F0-9]{64}$/.test(val)) {
         badge.className = "search-type-badge type-hash font-mono";
         badge.innerText = "[HASH: SHA-256]";
+        badge.removeAttribute("style");
+        return;
+    }
+
+    // Check individual vectors
+    const hasEmail = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(val);
+    const hasPhone = /(?:\+\d[\d\s\-\(\)\.]{6,20}\d|^\+?\d{7,15}$)/.test(val) && (val.match(/\d/g) || []).length >= 7;
+    const hasHandle = /(?:^|\s)@[a-zA-Z0-9_\-\.]{3,30}/.test(val);
+    
+    // Check vector counts for MULTI-VECTOR FUSION
+    let vectorCount = 0;
+    if (hasEmail) vectorCount++;
+    if (hasPhone) vectorCount++;
+    if (hasHandle) vectorCount++;
+
+    // Check if remaining text has words (probable name or city location)
+    let remainder = val;
+    if (hasEmail) remainder = remainder.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, ' ');
+    if (hasPhone) remainder = remainder.replace(/(?:\+\d[\d\s\-\(\)\.]{6,20}\d)/g, ' ');
+    const hasNameOrWords = /[a-zA-Z]{2,}/.test(remainder.trim());
+    if (hasNameOrWords && (hasEmail || hasPhone)) vectorCount++;
+
+    if (vectorCount > 1) {
+        badge.className = "search-type-badge font-mono";
+        badge.style.color = "#f59e0b";
+        badge.style.borderColor = "rgba(245, 158, 11, 0.5)";
+        badge.style.background = "rgba(245, 158, 11, 0.15)";
+        badge.innerText = `[⚡ FUSION: ${vectorCount} VECTORS]`;
         return;
     }
 
     // 2. Phone detection (starts with + or contains 7+ digits, no @, no letters)
     if (/^\+?[0-9\s\-\(\)\.]{7,22}$/.test(val) && (val.match(/\d/g) || []).length >= 7 && !/[a-zA-Z]/.test(val)) {
         badge.className = "search-type-badge type-phone font-mono";
-        badge.innerText = "[TELECOM: E.164]";
+        badge.style.color = "#34d399";
+        badge.style.borderColor = "rgba(52, 211, 153, 0.5)";
+        badge.style.background = "rgba(52, 211, 153, 0.12)";
+        badge.innerText = "[📱 TELECOM E.164]";
         return;
     }
 
     // 3. Email detection
     if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
         badge.className = "search-type-badge type-email font-mono";
-        badge.innerText = "[EMAIL TARGET]";
+        badge.style.color = "#38bdf8";
+        badge.style.borderColor = "rgba(56, 189, 248, 0.5)";
+        badge.style.background = "rgba(56, 189, 248, 0.12)";
+        badge.innerText = "[📧 EMAIL TARGET]";
         return;
     }
 
     // 4. Domain detection (contains dot without @, or starts with @)
     if ((!val.includes("@") && val.includes(".")) || (val.startsWith("@") && val.includes("."))) {
         badge.className = "search-type-badge type-domain font-mono";
-        badge.innerText = "[DOMAIN RECON]";
+        badge.style.color = "#a78bfa";
+        badge.style.borderColor = "rgba(167, 139, 250, 0.5)";
+        badge.style.background = "rgba(167, 139, 250, 0.12)";
+        badge.innerText = "[🏢 DOMAIN RECON]";
+        return;
+    }
+
+    // 5. Handle / Pseudonym detection
+    if (val.startsWith("@")) {
+        badge.className = "search-type-badge font-mono";
+        badge.style.color = "#c084fc";
+        badge.style.borderColor = "rgba(192, 132, 252, 0.5)";
+        badge.style.background = "rgba(192, 132, 252, 0.12)";
+        badge.innerText = "[🌐 HANDLE TARGET]";
+        return;
+    }
+
+    // 6. Name / Person query detection
+    if (val.includes(" ") && /^[a-zA-Z\s\.\-']+$/.test(val)) {
+        badge.className = "search-type-badge font-mono";
+        badge.style.color = "#22d3ee";
+        badge.style.borderColor = "rgba(34, 211, 238, 0.5)";
+        badge.style.background = "rgba(34, 211, 238, 0.12)";
+        badge.innerText = "[👤 IDENTITY / PERSON]";
         return;
     }
 
     badge.className = "search-type-badge font-mono";
     badge.innerText = "[TARGET ID]";
+    badge.removeAttribute("style");
 }
 window.updateSearchInputTypeBadge = updateSearchInputTypeBadge;
 
@@ -1428,6 +1502,9 @@ function setupEventListeners() {
             if (targetId === "tab-telecom" && currentInvestigationData) {
                 renderTelecomTab(currentInvestigationData);
             }
+            if (targetId === "tab-provenance-console" && currentInvestigationData) {
+                renderProvenanceConsole(currentInvestigationData);
+            }
         });
     });
 
@@ -1465,7 +1542,7 @@ function setupEventListeners() {
     const btnTidy = document.getElementById("btn-graph-tidy");
     if (btnTidy) {
         btnTidy.addEventListener("click", () => {
-            tidyGraphConcentric();
+            toggleRadarOrbits();
         });
     }
 
@@ -1608,11 +1685,14 @@ window.updateDeclassifyStatusBadge = updateDeclassifyStatusBadge;
 function handleFindingCardClick(cardType) {
     const tabMap = {
         creds: "tab-creds",
+        stealers: "tab-leaks",
+        leaks: "tab-leaks",
         address: "tab-physical",
         phone: "tab-pivots",
         relative: "tab-physical",
         pivots: "tab-pivots",
-        workplace: "tab-pivots"
+        workplace: "tab-pivots",
+        family: "tab-pivots"
     };
     const targetTab = tabMap[cardType];
     if (targetTab) {
@@ -1630,6 +1710,11 @@ function handleFindingCardClick(cardType) {
                     window.filterPivotCategory("identity");
                 }
             }, 60);
+        }
+        // Smooth scroll to forensic evidence tabs so user immediately sees corresponding data
+        const evSection = document.querySelector('.evidence-section');
+        if (evSection) {
+            evSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     }
 }
@@ -1651,11 +1736,19 @@ function initStandbyState() {
     if (standbyBox) standbyBox.style.display = "flex";
     if (summaryBanner) summaryBanner.style.display = "none";
 
+    const disambiguationBar = document.getElementById("identity-disambiguation-bar");
+    if (disambiguationBar) disambiguationBar.style.display = "none";
+    const domainFidelityBadge = document.getElementById("email-domain-fidelity-badge");
+    if (domainFidelityBadge) domainFidelityBadge.style.display = "none";
+    const handleRarityBadge = document.getElementById("handle-rarity-badge");
+    if (handleRarityBadge) handleRarityBadge.style.display = "none";
+
     const tabIds = [
         "tab-leaks-content",
         "tab-creds-content",
         "tab-pivots-content",
         "tab-suspected-content",
+        "tab-images-content",
         "tab-physical-content",
         "tab-provenance-content",
         "tab-playbook-content",
@@ -1671,16 +1764,14 @@ function initStandbyState() {
     if (suspectedCountBadge) {
         suspectedCountBadge.innerText = "0";
     }
+    const imagesCountBadge = document.getElementById("count-images");
+    if (imagesCountBadge) {
+        imagesCountBadge.innerText = "0";
+    }
 
     const networkGraph = document.getElementById("network-graph");
     if (networkGraph) {
-        networkGraph.innerHTML = `
-            <div class="graph-standby-placeholder">
-                <div class="standby-glyph">⬡</div>
-                <div class="standby-title">Identity Exposure Graph Standby</div>
-                <div class="standby-desc">Enter any email address above or click the example target to correlate multi-source attack chains.</div>
-            </div>
-        `;
+        networkGraph.innerHTML = "";
     }
 }
 
@@ -1701,6 +1792,22 @@ function loadExampleTarget(email) {
 window.loadExampleTarget = loadExampleTarget;
 window.loadDemoProfile = () => loadExampleTarget("test@gmail.com");
 
+function clearTransientAnchors() {
+    const extraPanel = document.getElementById("extra-intel-panel");
+    const isPanelActive = extraPanel && extraPanel.style.display !== "none" && !extraPanel.classList.contains("hidden");
+    if (!isPanelActive) {
+        const aName = document.getElementById("anchor-name");
+        const aUser = document.getElementById("anchor-username");
+        const aPhone = document.getElementById("anchor-phone");
+        const aCity = document.getElementById("anchor-city");
+        if (aName) aName.value = "";
+        if (aUser) aUser.value = "";
+        if (aPhone) aPhone.value = "";
+        if (aCity) aCity.value = "";
+    }
+}
+window.clearTransientAnchors = clearTransientAnchors;
+
 /**
  * Handle manual user search
  */
@@ -1713,6 +1820,7 @@ function triggerSearch() {
         return;
     }
     playSound("click");
+    clearTransientAnchors();
 
     // Check if input is a cryptographic hash (MD5, SHA-1, SHA-256)
     if (/^[a-fA-F0-9]{32}$|^[a-fA-F0-9]{40}$|^[a-fA-F0-9]{64}$/.test(rawVal)) {
@@ -1749,16 +1857,17 @@ function triggerSearch() {
     }
 
     // Check if input is a phone number (E.164 / digits)
-    if (/^\+?[0-9\s\-\(\)\.]{7,22}$/.test(rawVal) && (rawVal.match(/\d/g) || []).length >= 7 && !/[a-zA-Z]/.test(rawVal)) {
-        showToast(`Querying telecom directory on: ${rawVal}`, "info");
-        fetch(`/api/recon/telecom?query=${encodeURIComponent(rawVal)}`)
-            .then(r => r.json())
-            .then(res => {
-                if (res.e164_formatted || res.carrier) {
-                    showToast(`Telecom Line: ${res.e164_formatted || rawVal} | Carrier: ${res.carrier || 'Detected'}`, "success");
-                }
-            })
-            .catch(() => { });
+    const isDirectPhone = (/^\+?[0-9\s\-\(\)\.]{7,22}$/.test(rawVal) && (rawVal.match(/\d/g) || []).length >= 7 && !/[a-zA-Z]/.test(rawVal)) || (rawVal.startsWith("+") && (rawVal.match(/\d/g) || []).length >= 6);
+    if (isDirectPhone) {
+        // Direct phone target search - ensure anchor-phone is cleared so it never sticks to future searches!
+        const anchorPhoneInput = document.getElementById("anchor-phone");
+        if (anchorPhoneInput) {
+            anchorPhoneInput.value = "";
+        }
+        showToast(`Target Telecom Number: ${rawVal} — Initiating carrier & directory recon`, "info");
+        currentEmail = rawVal;
+        routeInvestigationWithBridgeCheck(currentEmail);
+        return;
     }
 
     // Check if input is a domain (e.g. cybercorp.io, @cybercorp.io, spotify.com)
@@ -1768,34 +1877,29 @@ function triggerSearch() {
         return;
     }
 
-    // Composite query decomposition: detect combined queries like "Amir Secic 3gbxdd@gmail.com"
-    const emailMatch = rawVal.match(/[\w\.-]+@[\w\.-]+\.\w+/);
-    if (emailMatch) {
-        const extractedEmail = emailMatch[0].toLowerCase();
-        const remainder = rawVal.replace(emailMatch[0], "").replace(/[()<>,;:\[\]"']/g, " ").trim();
-        if (remainder && remainder.length >= 2 && /[a-zA-Z]/.test(remainder)) {
-            const anchorNameInput = document.getElementById("anchor-name");
-            if (anchorNameInput && (!anchorNameInput.value || anchorNameInput.value.trim() === "")) {
-                anchorNameInput.value = remainder;
-                showToast(`Anchor Detected: Name [${remainder}] linked to ${extractedEmail}`, "info");
-            }
-        }
-        currentEmail = extractedEmail;
-        routeInvestigationWithBridgeCheck(currentEmail);
-        return;
-    }
-
-    if (!rawVal.includes("@") && rawVal.includes(" ")) {
-        const anchorNameInput = document.getElementById("anchor-name");
-        if (anchorNameInput && (!anchorNameInput.value || anchorNameInput.value.trim() === "")) {
-            anchorNameInput.value = rawVal;
-            showToast(`Person Target: [${rawVal}] activated for onomastic & OSINT search`, "info");
-        }
-    }
-
     currentEmail = rawVal;
     routeInvestigationWithBridgeCheck(currentEmail);
 }
+
+function setQueryAndSearch(query) {
+    const searchInput = document.getElementById("search-input");
+    if (searchInput) {
+        searchInput.value = query;
+        triggerSearch();
+    }
+}
+window.setQueryAndSearch = setQueryAndSearch;
+
+function handleSearch(event) {
+    if (event) {
+        if (typeof event.preventDefault === "function") event.preventDefault();
+        if (typeof event.stopPropagation === "function") event.stopPropagation();
+    }
+    triggerSearch();
+    return false;
+}
+window.handleSearch = handleSearch;
+window.triggerSearch = triggerSearch;
 
 function closeDomainReconModal() {
     const modal = document.getElementById("domain-recon-modal");
@@ -2265,26 +2369,57 @@ function addReconLog(streamEl, tag, tagClass, message, startTime) {
  */
 async function executeInvestigation(email) {
     playSound("search");
+
+    const extraPanel = document.getElementById("extra-intel-panel");
+    const isPanelActive = extraPanel && extraPanel.style.display !== "none" && !extraPanel.classList.contains("hidden");
+    if (!isPanelActive) {
+        clearTransientAnchors();
+    }
+
+    // Hide idle or previous result displays cleanly while scanning
     const standbyBox = document.getElementById("standby-status-box");
     if (standbyBox) standbyBox.style.display = "none";
+    const cleanBox = document.getElementById("clean-status-box");
+    if (cleanBox) cleanBox.style.display = "none";
+    const warningBox = document.getElementById("domain-warning-box");
+    if (warningBox) warningBox.style.display = "none";
+    const targetCard = document.getElementById("target-exposure-card");
+    if (targetCard) targetCard.style.display = "none";
+    const summaryBanner = document.getElementById("summary-metrics-banner");
+    if (summaryBanner) summaryBanner.style.display = "none";
+    const disambiguationBar = document.getElementById("identity-disambiguation-bar");
+    if (disambiguationBar) disambiguationBar.style.display = "none";
 
     const scanline = document.getElementById("search-scanline");
     if (scanline) scanline.classList.add("active");
 
+    const progContainer = document.getElementById("recon-progress-bar");
+    const progFill = document.getElementById("recon-progress-fill");
+    const progPercent = document.getElementById("recon-progress-percent");
+    const progTextEl = document.getElementById("recon-progress-text");
+    const targetTagEl = document.getElementById("recon-target-tag");
+    const timerEl = document.getElementById("recon-timer");
     const reconTerminal = document.getElementById("recon-terminal");
     const logStream = document.getElementById("recon-log-stream");
-    const timerEl = document.getElementById("recon-timer");
-    const targetTagEl = document.getElementById("recon-target-tag");
-    const progTextEl = document.getElementById("recon-progress-text");
-    const progBarEl = document.getElementById("recon-progress-bar");
 
-    if (reconTerminal) {
-        reconTerminal.style.display = "block";
-        if (logStream) logStream.innerHTML = "";
-        if (targetTagEl) targetTagEl.innerText = `TARGET: ${email}`;
-        if (progBarEl) progBarEl.style.width = "10%";
-        if (progTextEl) progTextEl.innerText = "Phase 1/6: Querying Global Breach Indices (XposedOrNot)...";
+    // Reveal and initialize loading screen
+    if (progContainer) {
+        progContainer.style.display = "block";
+        try { progContainer.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) { }
     }
+    if (progFill) {
+        progFill.style.width = "10%";
+        progFill.style.background = "linear-gradient(90deg, #0284c7, #38bdf8, #818cf8)";
+    }
+    if (progPercent) {
+        progPercent.innerText = "10%";
+        progPercent.style.color = "#38bdf8";
+    }
+    if (progTextEl) progTextEl.innerText = "Phase 1/6: Querying Global Breach Indices (XposedOrNot)...";
+    if (targetTagEl) targetTagEl.innerText = `TARGET: ${email}`;
+    if (timerEl) timerEl.innerText = "0.0s";
+    if (reconTerminal) reconTerminal.style.display = "block";
+    if (logStream) logStream.innerHTML = "";
 
     const startTime = performance.now();
     const timerInterval = setInterval(() => {
@@ -2296,42 +2431,64 @@ async function executeInvestigation(email) {
     addReconLog(logStream, "INIT", "recon-tag-info", `Starting multi-tool OSINT super-engine reconnaissance on ${email}...`, startTime);
 
     const t1 = setTimeout(() => {
-        if (progBarEl) progBarEl.style.width = "28%";
+        if (progFill) progFill.style.width = "28%";
+        if (progPercent) progPercent.innerText = "28%";
         if (progTextEl) progTextEl.innerText = "Phase 2/6: Holehe Engine: Probing 120+ Platform Endpoints...";
         addReconLog(logStream, "HOLEHE_PROBE", "recon-tag-probe", "Probing Spotify, Twitter/X, Office365, Snapchat, Duolingo, LastPass, Adobe...", startTime);
     }, 400);
 
     const t2 = setTimeout(() => {
-        if (progBarEl) progBarEl.style.width = "50%";
+        if (progFill) progFill.style.width = "50%";
+        if (progPercent) progPercent.innerText = "50%";
         if (progTextEl) progTextEl.innerText = "Phase 3/6: OpenPGP Keyservers & Gravatar Profile v2...";
         addReconLog(logStream, "CRYPTO_PROFILE", "recon-tag-git", "Querying Ubuntu HKP & keys.openpgp.org keyservers. Parsing Gravatar public bio & linked accounts...", startTime);
     }, 1100);
 
     const t3 = setTimeout(() => {
-        if (progBarEl) progBarEl.style.width = "72%";
+        if (progFill) progFill.style.width = "72%";
+        if (progPercent) progPercent.innerText = "72%";
         if (progTextEl) progTextEl.innerText = "Phase 4/6: Git Archaeology & Candidate Document Mining...";
         addReconLog(logStream, "GIT_ARCHAEOLOGY", "recon-tag-git", "Mining GitHub global commit metadata, repositories (*.github.io), and contact CV documents...", startTime);
     }, 1800);
 
     const t4 = setTimeout(() => {
-        if (progBarEl) progBarEl.style.width = "88%";
+        if (progFill) progFill.style.width = "88%";
+        if (progPercent) progPercent.innerText = "88%";
         if (progTextEl) progTextEl.innerText = "Phase 5/6: International Telecom & WhatsMyName Cross-Checks...";
         addReconLog(logStream, "CROSS_PIVOT", "recon-tag-telecom", "Validating carrier network (E.164/libphonenumber). Probing 12 developer/social registries across handles...", startTime);
     }, 2600);
 
     try {
         let anchorQuery = "";
-        const aName = document.getElementById("anchor-name")?.value.trim();
-        const aUser = document.getElementById("anchor-username")?.value.trim();
-        const aPhone = document.getElementById("anchor-phone")?.value.trim();
-        const aCity = document.getElementById("anchor-city")?.value.trim();
-        if (aName) anchorQuery += `&known_name=${encodeURIComponent(aName)}`;
-        if (aUser) anchorQuery += `&known_username=${encodeURIComponent(aUser)}`;
-        if (aPhone) anchorQuery += `&known_phone=${encodeURIComponent(aPhone)}`;
-        if (aCity) anchorQuery += `&known_city=${encodeURIComponent(aCity)}`;
+        const extraPanel = document.getElementById("extra-intel-panel");
+        const isPanelActive = extraPanel && extraPanel.style.display !== "none" && !extraPanel.classList.contains("hidden");
 
-        const url = `/api/search?email=${encodeURIComponent(email)}&audit_mode=${auditMode}&refresh=true${anchorQuery}`;
-        const res = await fetch(url);
+        if (isPanelActive) {
+            const getAnchorVal = (id) => {
+                const el = document.getElementById(id);
+                if (!el) return "";
+                const v = (el.value !== undefined ? el.value : (el.innerText || el.textContent || ""));
+                return typeof v === "string" ? v.trim() : "";
+            };
+            const aName = getAnchorVal("anchor-name");
+            const aUser = getAnchorVal("anchor-username");
+            const aPhone = getAnchorVal("anchor-phone");
+            const aCity = getAnchorVal("anchor-city");
+            if (aName) anchorQuery += `&known_name=${encodeURIComponent(aName)}`;
+            if (aUser) anchorQuery += `&known_username=${encodeURIComponent(aUser)}`;
+            if (aPhone) anchorQuery += `&known_phone=${encodeURIComponent(aPhone)}`;
+            if (aCity) anchorQuery += `&known_city=${encodeURIComponent(aCity)}`;
+        }
+
+        const url = `/api/search?email=${encodeURIComponent(email)}&query=${encodeURIComponent(email)}&audit_mode=${auditMode}&refresh=true${anchorQuery}`;
+        const abortCtrl = new AbortController();
+        const abortTimeout = setTimeout(() => abortCtrl.abort(), 120000);
+        let res;
+        try {
+            res = await fetch(url, { signal: abortCtrl.signal });
+        } finally {
+            clearTimeout(abortTimeout);
+        }
 
         if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
@@ -2341,12 +2498,29 @@ async function executeInvestigation(email) {
         const data = await res.json();
         currentInvestigationData = data;
 
-        if (progBarEl) progBarEl.style.width = "100%";
-        if (progTextEl) progTextEl.innerText = "Phase 6/6: Multi-Hop Intelligence Synthesized";
+        clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4);
+        if (progFill) {
+            progFill.style.width = "100%";
+            progFill.style.background = "linear-gradient(90deg, #10b981, #34d399, #38bdf8)";
+        }
+        if (progPercent) {
+            progPercent.innerText = "100%";
+            progPercent.style.color = "#34d399";
+        }
         addReconLog(logStream, "SYNTHESIS", "recon-tag-done", `Reconnaissance finished in ${((performance.now() - startTime) / 1000).toFixed(2)}s. Correlated forensic pivots ingested.`, startTime);
 
-        await new Promise(r => setTimeout(r, 400));
-        if (reconTerminal) reconTerminal.style.display = "none";
+        if (data.cardinal_thoughts && Array.isArray(data.cardinal_thoughts)) {
+            data.cardinal_thoughts.forEach(th => {
+                const tagClass = th.phase === "SYNTHESIS" ? "recon-tag-done" : (th.phase === "PIVOT_STRIKE" ? "recon-tag-telecom" : "recon-tag-probe");
+                addReconLog(logStream, `CARDINAL_${th.phase}`, tagClass, `${th.title}: ${th.thought}`, startTime);
+            });
+        }
+
+        // Pause briefly for user to perceive 100% completion
+        await new Promise(r => setTimeout(r, 450));
+        clearInterval(timerInterval);
+        if (progContainer) progContainer.style.display = "none";
+        if (scanline) scanline.classList.remove("active");
 
         // Render sections
         renderResultsView(data, email);
@@ -2354,6 +2528,11 @@ async function executeInvestigation(email) {
         renderEvidenceTabs(data);
         renderGraph(data.graph);
         renderAIReviewSection(data);
+
+        const traceMetric = document.getElementById("metric-trace-steps-count");
+        if (traceMetric && data.execution_trace && data.execution_trace.steps) {
+            traceMetric.innerText = `${data.execution_trace.steps.length} PHASES`;
+        }
 
         // Feedback
         if (window.sfx) {
@@ -2373,7 +2552,8 @@ async function executeInvestigation(email) {
     } catch (err) {
         console.error("Investigation failed:", err);
         showToast(err.message || "Investigation failed.", "error");
-        if (reconTerminal) reconTerminal.style.display = "none";
+        if (progContainer) progContainer.style.display = "none";
+        if (standbyBox) standbyBox.style.display = "flex";
 
         // --- INJECTED ERROR BOUNDARY ---
         const errContainer = document.getElementById("network-canvas");
@@ -2393,6 +2573,7 @@ async function executeInvestigation(email) {
         clearTimeout(t4);
     }
 }
+window.executeInvestigation = executeInvestigation;
 
 /**
  * Render between Clean State (0 score) and Compromised State (>0 score)
@@ -2413,7 +2594,9 @@ function renderResultsView(data, email) {
 
     // 0. Check Email & Domain Verification
     const v = data.email_verification;
-    if (v && !v.is_valid) {
+    const isPhoneTarget = data.target_type === "PHONE" || (data.phone_recon && data.phone_recon.is_valid) || (email && (email.startsWith("phone.") || email.startsWith("+") || /^\+?[\d\s\-\(\)\.]{7,}$/.test(email)));
+    const isSyntheticOsint = isPhoneTarget || (email && (email.endsWith("@osint.local") || email.endsWith("@local"))) || (v && (v.status === "VERIFIED_PHONE_TARGET" || v.status === "OSINT_TARGET"));
+    if (v && !v.is_valid && !isSyntheticOsint) {
         if (warningBox) warningBox.style.display = "flex";
         if (warningTitle) warningTitle.innerText = v.status === "NON_EXISTENT_DOMAIN" ? "Domain Does Not Exist / Dead Mail Host" : "Invalid Email Address Format";
         if (warningBadge) {
@@ -2425,7 +2608,7 @@ function renderResultsView(data, email) {
         if (targetCard) targetCard.style.display = "none";
         showToast(v.reason, "error");
         return;
-    } else if (v && v.is_disposable) {
+    } else if (v && v.is_disposable && !isSyntheticOsint) {
         if (warningBox) warningBox.style.display = "flex";
         if (warningTitle) warningTitle.innerText = "Disposable / Burner Email Service Detected";
         if (warningBadge) {
@@ -2460,91 +2643,580 @@ function renderResultsView(data, email) {
     const targetEmailEl = document.getElementById("target-email-display");
     const avatarEl = document.getElementById("target-avatar");
 
-    if (targetNameEl) targetNameEl.innerText = hasRealName ? emp.full_name : (emp.corporate_email || email);
-    if (targetEmailEl) targetEmailEl.innerText = emp.corporate_email || email;
+    const tm = data.target_manifest || {};
+    if (tm.target_type === "COMPOSITE") {
+        const primaryTitle = tm.name || emp.full_name || "Investigated Target";
+        if (targetNameEl) targetNameEl.innerText = primaryTitle;
+        
+        let badgesHtml = "";
+        if (tm.email) {
+            badgesHtml += `<span class="badge-pill badge-info font-mono mr-1.5" style="font-size: 0.72rem;">📧 ${escapeHtml(tm.email)}</span>`;
+        }
+        if (tm.phone) {
+            const carrStr = tm.phone_carrier ? ` (${tm.phone_carrier})` : "";
+            badgesHtml += `<span class="badge-pill badge-clean font-mono mr-1.5" style="font-size: 0.72rem;">📱 ${escapeHtml(tm.phone)}${escapeHtml(carrStr)}</span>`;
+        }
+        if (tm.city || tm.country) {
+            const geoStr = [tm.city, tm.country].filter(Boolean).join(", ");
+            badgesHtml += `<span class="badge-pill badge-low font-mono mr-1.5" style="font-size: 0.72rem;">📍 ${escapeHtml(geoStr)}</span>`;
+        }
+        badgesHtml += `<span class="badge-pill font-mono" style="font-size: 0.72rem; color: #f59e0b; border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.15);">⚡ MULTI-VECTOR FUSION</span>`;
+        
+        if (targetEmailEl) targetEmailEl.innerHTML = badgesHtml;
 
+        if (avatarEl) {
+            const initials = primaryTitle.split(" ").filter(Boolean).map(n => n[0]).join("").substring(0, 2).toUpperCase() || "ID";
+            avatarEl.innerHTML = `<span class="mono font-bold" style="font-size: 1.15rem; letter-spacing: 0.05em; color: #f59e0b;">${escapeHtml(initials)}</span>`;
+        }
+    } else if (isPhoneTarget && data.phone_recon) {
+        const pr = data.phone_recon;
+        const phoneDisplay = pr.international_format || pr.e164 || email;
+        const carrierDisplay = pr.carrier ? `${pr.carrier} (${pr.country || "Telecom"})` : (pr.country || "Cellular Network");
+        if (targetNameEl) targetNameEl.innerText = `${phoneDisplay} • ${pr.carrier || "Cellular"}`;
+        if (targetEmailEl) targetEmailEl.innerHTML = `<span class="mono text-sky-400 font-semibold">${escapeHtml(phoneDisplay)}</span> <span class="badge-pill badge-info ml-2" style="font-size: 0.72rem;">${escapeHtml(carrierDisplay)}</span> <span class="badge-pill badge-low ml-1" style="font-size: 0.72rem;">${escapeHtml(pr.line_type || "Mobile / Cellular")}</span>`;
+        if (avatarEl) {
+            avatarEl.innerHTML = `<svg class="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>`;
+        }
+    } else {
+        if (targetNameEl) targetNameEl.innerText = hasRealName ? emp.full_name : (emp.corporate_email || email);
+        if (targetEmailEl) targetEmailEl.innerText = emp.corporate_email || email;
+
+        if (avatarEl) {
+            if (hasRealName) {
+                const initials = emp.full_name.split(" ").filter(Boolean).map(n => n[0]).join("").substring(0, 2).toUpperCase();
+                avatarEl.innerHTML = `<span class="mono font-bold" style="font-size: 1.15rem; letter-spacing: 0.05em; color: #38bdf8;">${escapeHtml(initials)}</span>`;
+            } else {
+                avatarEl.innerHTML = `<span class="mono font-bold" style="font-size: 1.15rem; color: #38bdf8;">@</span>`;
+            }
+        }
+    }
     if (avatarEl) {
-        const avatarPiv = (data.pivots || []).find(p => p.pivot_type === "AVATAR_CORRELATION");
-        let avatarUrl = null;
-        if (avatarPiv) {
-            const m = (avatarPiv.pivot_value || "").match(/(https?:\/\/[^\s]+)/) || ((avatarPiv.context_note || "").match(/(https?:\/\/[^\s]+)/));
-            if (m) avatarUrl = m[1].replace(/\]$/, '');
+        avatarEl.style.display = "flex";
+        avatarEl.style.alignItems = "center";
+        avatarEl.style.justifyContent = "center";
+        avatarEl.style.background = "linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95))";
+        avatarEl.style.border = "1px solid rgba(56, 189, 248, 0.4)";
+        avatarEl.style.borderRadius = "8px";
+        avatarEl.title = "Target Identity Shield - Click to view discovered images in Media & Imagery tab";
+        avatarEl.style.cursor = "pointer";
+        avatarEl.onclick = () => {
+            const btn = document.querySelector('.tab-btn[data-tab="tab-images"]');
+            if (btn) btn.click();
+        };
+    }
+
+// Spillover Score Calculation & Visualization (Use Natural Risk Words, No Tiers)
+const scoreVal = data.spillover_score ? (data.spillover_score.numeric_score ?? data.spillover_score.score) : 0;
+const riskLevel = (data.spillover_score && data.spillover_score.level) ? data.spillover_score.level : "LOW";
+const scoreNumEl = document.getElementById("score-number");
+const scoreNumericBadge = document.getElementById("score-numeric-badge");
+const scoreLevelLabel = document.getElementById("score-level-label");
+
+if (scoreNumEl) {
+    scoreNumEl.innerText = riskLevel === "CLEAN" ? "CLEAN" : `${riskLevel} RISK`;
+    scoreNumEl.style.color = (riskLevel === "CLEAN") ? "#10b981" : (data.spillover_score.color || "#ef4444");
+    scoreNumEl.style.fontSize = "1.85rem";
+}
+if (scoreNumericBadge) {
+    scoreNumericBadge.innerText = `SCORE: ${scoreVal}/100`;
+}
+if (scoreLevelLabel) {
+    scoreLevelLabel.innerText = "RISK RATING";
+}
+
+const badgeEl = document.getElementById("severity-badge");
+if (badgeEl) {
+    if (riskLevel === "CLEAN" || scoreVal === 0) {
+        badgeEl.className = "badge-pill badge-clean";
+        badgeEl.innerText = "AUTHENTICATED CLEAN";
+        badgeEl.style.borderColor = "#10b981";
+        badgeEl.style.color = "#10b981";
+        badgeEl.style.background = "rgba(16, 185, 129, 0.15)";
+    } else {
+        badgeEl.className = `badge-pill ${data.spillover_score.badge_class || 'badge-high'}`;
+        badgeEl.innerText = `${riskLevel} RISK`;
+        badgeEl.style.borderColor = data.spillover_score.color || "#ef4444";
+        badgeEl.style.color = data.spillover_score.color || "#ef4444";
+        badgeEl.style.background = (data.spillover_score.color || "#ef4444") + "22";
+    }
+}
+
+const domBadge = document.getElementById("domain-status-badge");
+if (domBadge) {
+    const ev = data.email_verification;
+    if (ev && ev.email_security) {
+        const prov = ev.email_security.mail_provider || ev.provider_type || "Mail Infrastructure";
+        const isSafe = ev.email_security.spoofing_risk === "PROTECTED";
+        domBadge.style.display = "inline-flex";
+        domBadge.className = isSafe ? "badge-pill badge-clean" : "badge-pill badge-medium";
+        domBadge.innerHTML = `<span class="flex items-center gap-1">${getUiIcon('mail', 'w-3 h-3 text-sky-400')} ${escapeHtml(prov)} [SPF: ${escapeHtml(ev.email_security.spf_status || 'OK')}]</span>`;
+    } else {
+        domBadge.style.display = "none";
+    }
+}
+
+// Email Dissection: Domain Fidelity and Handle Rarity Badges
+const domainFidelityBadge = document.getElementById("email-domain-fidelity-badge");
+const handleRarityBadge = document.getElementById("handle-rarity-badge");
+const dissection = data.email_dissection;
+
+if (dissection) {
+    if (domainFidelityBadge) {
+        domainFidelityBadge.style.display = "inline-flex";
+        if (dissection.domain_type === "CORPORATE_CUSTOM") {
+            domainFidelityBadge.style.background = "rgba(16, 185, 129, 0.15)";
+            domainFidelityBadge.style.color = "#34d399";
+            domainFidelityBadge.style.borderColor = "rgba(16, 185, 129, 0.35)";
+            domainFidelityBadge.innerText = "[DOMAIN: CORPORATE (HIGH PIVOT FIDELITY)]";
+            domainFidelityBadge.title = "High confidence corporate/custom domain. Low cross-person username collision risk.";
+        } else if (dissection.domain_type === "DISPOSABLE_BURNER") {
+            domainFidelityBadge.style.background = "rgba(244, 63, 94, 0.15)";
+            domainFidelityBadge.style.color = "#fb7185";
+            domainFidelityBadge.style.borderColor = "rgba(244, 63, 94, 0.35)";
+            domainFidelityBadge.innerText = "[DOMAIN: DISPOSABLE BURNER (ZERO FIDELITY)]";
+            domainFidelityBadge.title = "Disposable or temporary mailbox provider. High risk of recycled or synthetic identifiers.";
+        } else {
+            domainFidelityBadge.style.background = "rgba(245, 158, 11, 0.15)";
+            domainFidelityBadge.style.color = "#fbbf24";
+            domainFidelityBadge.style.borderColor = "rgba(245, 158, 11, 0.35)";
+            domainFidelityBadge.innerText = "[DOMAIN: FREE WEBMAIL (LOW PIVOT FIDELITY)]";
+            domainFidelityBadge.title = "Free public webmail provider. Email prefixes collide widely across unrelated platforms.";
         }
-        if (!avatarUrl && emp && emp.avatar_seed && emp.avatar_seed.startsWith("http")) {
-            avatarUrl = emp.avatar_seed;
+    }
+
+    if (handleRarityBadge && dissection.handle_rarity) {
+        handleRarityBadge.style.display = "inline-flex";
+        if (dissection.handle_rarity === "RARE_UNIQUE") {
+            handleRarityBadge.style.background = "rgba(16, 185, 129, 0.15)";
+            handleRarityBadge.style.color = "#34d399";
+            handleRarityBadge.style.borderColor = "rgba(16, 185, 129, 0.35)";
+            handleRarityBadge.innerText = `[HANDLE RARITY: RARE_UNIQUE (@${dissection.canonical_user || 'handle'})]`;
+        } else if (dissection.handle_rarity === "HIGH_COLLISION") {
+            handleRarityBadge.style.background = "rgba(245, 158, 11, 0.15)";
+            handleRarityBadge.style.color = "#fbbf24";
+            handleRarityBadge.style.borderColor = "rgba(245, 158, 11, 0.35)";
+            handleRarityBadge.innerText = `[HANDLE RARITY: HIGH_COLLISION (@${dissection.canonical_user || 'handle'})]`;
+        } else {
+            handleRarityBadge.style.background = "rgba(56, 189, 248, 0.15)";
+            handleRarityBadge.style.color = "#38bdf8";
+            handleRarityBadge.style.borderColor = "rgba(56, 189, 248, 0.35)";
+            handleRarityBadge.innerText = `[HANDLE RARITY: DISTINCTIVE (@${dissection.canonical_user || 'handle'})]`;
         }
-        if (avatarUrl && avatarUrl.includes("profile-framedphoto")) {
-            avatarUrl = null;
+    }
+} else {
+    if (domainFidelityBadge) domainFidelityBadge.style.display = "none";
+    if (handleRarityBadge) handleRarityBadge.style.display = "none";
+}
+
+// Render Identity Resolution & Candidate Persona Clusters Cockpit
+renderIdentityClusters(data);
+
+// Render Bento Overview Cards (Multi-Item Finding Pillars)
+renderTargetOverview(data);
+}
+
+/**
+ * Persona scoping helpers shared by the disambiguation cockpit, evidence tabs and graph.
+ */
+// =============================================================================
+// PERSONA SCOPING (Entity Resolution & Candidate Disambiguation cockpit)
+// =============================================================================
+const PERSONA_TARGET_ID = "persona_target";
+const MEDIA_PIVOT_TYPES = new Set(["AVATAR_CORRELATION", "VISUAL_ASSET", "MEDIA_ASSET", "IMAGE_ASSET"]);
+const MEDIA_CONTEXT_MARKERS = [
+    "[status: secondary avatar]", "[status: primary avatar]", "[tied: primary face]",
+    "[classification: real_human_portrait]", "[classification: website_banner_or_asset]",
+    "[classification: cartoon_or_avatar]"
+];
+// Mirrors backend/identity_signals.py IMAGE_EXT_RE + IMAGE_CDN_RE (structural, target-agnostic).
+const MEDIA_URL_RE = /\.(?:jpe?g|png|gif|webp|avif|bmp|heic)(?:[?#]|$)|\/dms\/image\/|fbcdn\.net\/|pbs\.twimg\.com\/|avatars\.githubusercontent\.com\/|gravatar\.com\/avatar\/|i\.pinimg\.com\/|cdninstagram\.com\/|googleusercontent\.com\/|ytimg\.com\/|ggpht\.com\/|steamstatic\.com\//i;
+const CORE_ATTRIBUTE_TYPES = new Set(["EDUCATION", "WORKPLACE", "TIMELINE", "TECH_STACK", "FLAGSHIP_PROJECT", "FULL_NAME", "PERSON_NAME", "IDENTITY_CORRELATION"]);
+
+/** Visual media assets (avatars, banners, album photos) belong only to [MEDIA & IMAGERY]. */
+function isVisualMediaPivot(p) {
+    if (!p) return false;
+    if (p.is_media_asset) return true;
+    const pt = String(p.pivot_type || "").toUpperCase();
+    if (MEDIA_PIVOT_TYPES.has(pt)) return true;
+    const pv = String(p.pivot_value || "");
+    const pvLow = pv.toLowerCase();
+    if (pvLow.includes("visual footprint")) return true;
+    const ctxLow = String(p.context_note || "").toLowerCase();
+    if (MEDIA_CONTEXT_MARKERS.some(m => ctxLow.includes(m))) return true;
+    const valuePart = (pv.includes(":") && !pvLow.startsWith("http")) ? pv.slice(pv.indexOf(":") + 1).trim() : pv;
+    return /^https?:\/\//i.test(valuePart) && MEDIA_URL_RE.test(valuePart);
+}
+
+function getPivotPersonaId(p) {
+    return (p && (p.persona_id || p.cluster_id)) || PERSONA_TARGET_ID;
+}
+
+function getScanPersonas(data) {
+    return (data && (data.personas || data.all_clusters)) || [];
+}
+
+/**
+ * Returns the active persona id, resetting it when a different target is
+ * loaded or the stored id no longer exists in this dossier.
+ */
+function getActivePersonaId(data) {
+    const emp = (data && data.employee) || {};
+    const scanKey = String(emp.id || emp.corporate_email || "");
+    if (window.activePersonaScanKey !== scanKey) {
+        window.activePersonaScanKey = scanKey;
+        window.activePersonaFilter = PERSONA_TARGET_ID;
+    }
+    const pid = window.activePersonaFilter || PERSONA_TARGET_ID;
+    const personas = getScanPersonas(data);
+    if (pid !== "all" && pid !== PERSONA_TARGET_ID && personas.length && !personas.some(p => p.cluster_id === pid)) {
+        window.activePersonaFilter = PERSONA_TARGET_ID;
+        return PERSONA_TARGET_ID;
+    }
+    window.activePersonaFilter = pid;
+    return pid;
+}
+
+/**
+ * Candidate-ledger membership. When the backend has attributed the pivot to a
+ * persona, that routing is authoritative (no client-side score thresholds).
+ * Legacy payloads without attribution fall back to explicit status tags.
+ */
+function isCandidateLedgerPivot(p) {
+    if (!p || isVisualMediaPivot(p)) return false;
+    const ctx = String(p.context_note || "");
+    const tagged = (
+        p.is_namesake_collision ||
+        ctx.includes("[STATUS: NAMESAKE_COLLISION]") ||
+        ctx.includes("[STATUS: CANDIDATE_LEAD]") ||
+        ctx.includes("[QUARANTINED") ||
+        ctx.includes("quarantined in candidate ledger")
+    );
+    if (p.persona_id || p.cluster_id) {
+        return getPivotPersonaId(p) !== PERSONA_TARGET_ID || tagged;
+    }
+    const pt = String(p.pivot_type || "").toUpperCase();
+    return tagged || pt === "SUSPECTED_ACCOUNT" || ctx.includes("[STATUS: SUSPECTED]") || ctx.includes("[PLATFORM: UNCONFIRMED]") ||
+        (p.confidence_score !== undefined && p.confidence_score < 0.85 && !CORE_ATTRIBUTE_TYPES.has(pt));
+}
+
+/** Lower-cased handles that identify a persona (label @handle, profiles, pivots). */
+function getPersonaHandles(persona) {
+    const handles = new Set();
+    if (!persona) return handles;
+    const lbl = String(persona.cluster_label || "");
+    const m = lbl.match(/@([a-z0-9_.\-]{3,})/i);
+    if (m) handles.add(m[1].toLowerCase());
+    (persona.profiles || []).forEach(pr => { if (pr.handle && String(pr.handle).length >= 3) handles.add(String(pr.handle).toLowerCase().replace(/^@/, "")); });
+    (persona.pivots || []).forEach(pv => {
+        const hm = String(pv.pivot_value || "").match(/@([a-z0-9_.\-]{3,})/i);
+        if (hm) handles.add(hm[1].toLowerCase());
+    });
+    return handles;
+}
+
+function textMentionsHandle(text, handle) {
+    if (!text || !handle) return false;
+    const esc = handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^a-z0-9])@?${esc}(?![a-z])`, "i").test(String(text));
+}
+
+/**
+ * Scopes breach credentials to the active persona. The core target and the
+ * unfiltered view see every credential (all are bound to the seed). Other
+ * personas see only credentials whose login fields mention their handles.
+ */
+function scopeCredentialsToPersona(creds, data) {
+    const pid = getActivePersonaId(data);
+    if (pid === "all" || pid === PERSONA_TARGET_ID) return creds;
+    const persona = getScanPersonas(data).find(p => p.cluster_id === pid);
+    const handles = [...getPersonaHandles(persona)];
+    if (!handles.length) return [];
+    return creds.filter(c => {
+        const blob = [c.username, c.login, c.email, c.url, c.domain, c.leak_name, c.source, c.service].filter(Boolean).join(" ");
+        return handles.some(h => textMentionsHandle(blob, h));
+    });
+}
+
+/** Persona-scoped graph: target hides other humans; a persona shows its subgraph plus bridging hubs. */
+function getPersonaScopedGraph(nodes, edges) {
+    const pid = window.activePersonaFilter || "all";
+    if (pid === "all") return { nodes, edges };
+    const personaOf = n => n.persona_id || (n.data && n.data.persona_id) || "";
+    let keep;
+    if (pid === PERSONA_TARGET_ID) {
+        keep = new Set(nodes.filter(n => { const p = personaOf(n); return !p || p === PERSONA_TARGET_ID; }).map(n => n.id));
+    } else {
+        const core = new Set(nodes.filter(n => personaOf(n) === pid).map(n => n.id));
+        keep = new Set(core);
+        const centre = nodes.find(n => n.category === "identity" || n.group === "employee" || String(n.id).startsWith("emp_"));
+        if (centre) keep.add(centre.id);
+        edges.forEach(e => {
+            if (core.has(e.to) && String(e.from).startsWith("hub_")) keep.add(e.from);
+            if (core.has(e.from) && String(e.to).startsWith("hub_")) keep.add(e.to);
+        });
+    }
+    return {
+        nodes: nodes.filter(n => keep.has(n.id)),
+        edges: edges.filter(e => keep.has(e.from) && keep.has(e.to))
+    };
+}
+
+/** Single entry point for persona chip clicks: re-renders every scoped view without reload. */
+function applyPersonaFilter(pid, data) {
+    window.activePersonaFilter = pid;
+    renderIdentityClusters(data);
+    if (typeof renderEvidenceTabs === "function") renderEvidenceTabs(data);
+    if (typeof renderTargetOverview === "function") renderTargetOverview(data);
+    if (typeof updateTargetHeaderForPersona === "function") updateTargetHeaderForPersona(data);
+    if (typeof filterGraphCategory === "function") filterGraphCategory(currentCategoryFilter || "all");
+}
+window.applyPersonaFilter = applyPersonaFilter;
+
+const PERSONA_CHIP_STYLES = {
+    CONFIRMED_PRIMARY: { border: "#10b981", bg: "rgba(16, 185, 129, 0.18)", text: "#6ee7b7", badge: "[CONFIRMED TARGET]" },
+    SECONDARY_ALIAS: { border: "rgba(56, 189, 248, 0.5)", bg: "rgba(56, 189, 248, 0.15)", text: "#38bdf8", badge: "[DISCOVERED ALIAS]" },
+    CANDIDATE_LEAD: { border: "rgba(148, 163, 184, 0.4)", bg: "rgba(148, 163, 184, 0.1)", text: "#cbd5e1", badge: "[SPECULATIVE PROBE]" },
+    NAMESAKE_COLLISION: { border: "#f59e0b", bg: "rgba(245, 158, 11, 0.15)", text: "#fbbf24", badge: "[NAMESAKE COLLISION]" },
+    DEMOGRAPHIC_OUTLIER: { border: "#a855f7", bg: "rgba(168, 85, 247, 0.15)", text: "#d8b4fe", badge: "[DEMOGRAPHIC OUTLIER]" },
+    UNCORROBORATED_LEAD: { border: "rgba(100, 116, 139, 0.5)", bg: "rgba(100, 116, 139, 0.12)", text: "#94a3b8", badge: "[UNCORROBORATED]" }
+};
+
+/**
+ * Renders the Identity Resolution & Multi-Persona Investigation Deck.
+ * Consolidates all discoveries into discrete human personas (Target, Aliases, Namesakes)
+ * allowing the investigator to switch between them cleanly with zero false positives.
+ */
+function renderIdentityClusters(data) {
+    window.cachedScanData = data;
+    const bar = document.getElementById("identity-disambiguation-bar");
+    const chipsRow = document.getElementById("identity-clusters-chips-row");
+    const countBadge = document.getElementById("identity-clusters-summary-count");
+    const detailsBox = document.getElementById("identity-cluster-details-box");
+    if (!bar || !chipsRow) return;
+
+    const personas = data.personas || data.all_clusters || [];
+    if (personas.length <= 1) {
+        bar.style.display = "none";
+        return;
+    }
+
+    bar.style.display = "block";
+    if (countBadge) {
+        countBadge.innerText = `1 TARGET / ${personas.length - 1} CANDIDATES`;
+    }
+
+    chipsRow.innerHTML = "";
+
+    // Set default active persona if not already set
+    if (!window.activePersonaFilter) {
+        window.activePersonaFilter = "persona_target";
+    }
+
+    personas.forEach((persona) => {
+        const pid = persona.cluster_id;
+        const count = (persona.pivots ? persona.pivots.length : 0) || (persona.profiles ? persona.profiles.length : 0);
+
+        let style = { border: "rgba(100, 116, 139, 0.5)", bg: "rgba(100, 116, 139, 0.12)", text: "#94a3b8", badge: persona.badge || "[UNCORROBORATED]" };
+
+        if (persona.is_primary || pid === "persona_target") {
+            style = PERSONA_CHIP_STYLES.CONFIRMED_PRIMARY;
+        } else if (PERSONA_CHIP_STYLES[persona.cluster_type]) {
+            style = PERSONA_CHIP_STYLES[persona.cluster_type];
+        } else if (persona.badge) {
+            style.badge = persona.badge;
         }
 
-        if (avatarUrl) {
-            avatarEl.innerHTML = `<img src="${escapeHtml(avatarUrl)}" alt="Target Face" style="width: 100%; height: 100%; object-fit: cover; border-radius: inherit;" onerror="this.onerror=null; this.parentElement.innerText='${hasRealName ? emp.full_name.substring(0, 2).toUpperCase() : '@'}'">`;
-            avatarEl.style.overflow = "hidden";
-            avatarEl.title = "Visual Footprint Discovered - Click for Reverse Face Search (Google Lens / PimEyes)";
-            avatarEl.style.cursor = "pointer";
-            avatarEl.onclick = () => {
-                window.open(`https://lens.google.com/uploadbyurl?url=${encodeURIComponent(avatarUrl)}`, '_blank');
-            };
-        } else if (hasRealName) {
+        const isCurrentActive = getActivePersonaId(data) === pid;
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = `btn-persona-card ${isCurrentActive ? 'active' : ''}`;
+        card.style.cssText = `
+            display: inline-flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 2px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            border: 1px solid ${isCurrentActive ? style.border : 'rgba(148, 163, 184, 0.2)'};
+            background: ${isCurrentActive ? style.bg : 'rgba(15, 23, 42, 0.5)'};
+            color: ${isCurrentActive ? style.text : '#94a3b8'};
+            cursor: pointer;
+            transition: all 0.15s ease;
+            min-width: 145px;
+            max-width: 220px;
+            height: 52px;
+            flex-shrink: 0;
+            box-sizing: border-box;
+            overflow: hidden;
+            text-align: left;
+            opacity: ${isCurrentActive ? '1' : '0.8'};
+        `;
+
+        card.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 6px; white-space: nowrap;">
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; color: ${style.text}; white-space: nowrap; flex-shrink: 0;">${escapeHtml(style.badge)}</span>
+                <span style="background: rgba(0, 0, 0, 0.4); padding: 1px 5px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #cbd5e1; flex-shrink: 0;">${count}</span>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;">
+                ${escapeHtml(String(persona.cluster_label || "").replace(/\[.*?\]/, '').trim())}
+            </div>
+        `;
+
+        card.onclick = () => {
+            applyPersonaFilter(pid, data);
+        };
+
+        chipsRow.appendChild(card);
+    });
+
+    // Add 'All Personas' Card
+    const isAllActive = getActivePersonaId(data) === 'all';
+    const allCard = document.createElement("button");
+    allCard.type = "button";
+    allCard.className = `btn-persona-card ${isAllActive ? 'active' : ''}`;
+    allCard.style.cssText = `
+        display: inline-flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 2px;
+        padding: 6px 12px;
+        border-radius: 8px;
+        border: 1px solid ${isAllActive ? '#38bdf8' : 'rgba(148, 163, 184, 0.2)'};
+        background: ${isAllActive ? 'rgba(56, 189, 248, 0.15)' : 'rgba(15, 23, 42, 0.5)'};
+        color: ${isAllActive ? '#38bdf8' : '#94a3b8'};
+        cursor: pointer;
+        transition: all 0.15s ease;
+        min-width: 135px;
+        max-width: 180px;
+        height: 52px;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        overflow: hidden;
+        text-align: left;
+        opacity: ${isAllActive ? '1' : '0.8'};
+    `;
+    const totalPivotsCount = (data.pivots || []).length;
+    allCard.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 6px; white-space: nowrap;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700; color: #94a3b8; white-space: nowrap; flex-shrink: 0;">[ALL FINDINGS]</span>
+            <span style="background: rgba(0, 0, 0, 0.4); padding: 1px 5px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #cbd5e1; flex-shrink: 0;">${totalPivotsCount}</span>
+        </div>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;">
+            All Personas
+        </div>
+    `;
+    allCard.onclick = () => {
+        applyPersonaFilter('all', data);
+    };
+    chipsRow.appendChild(allCard);
+
+    // Update Details Box for active persona
+    if (detailsBox) {
+        detailsBox.style.display = "block";
+        const activePersonaObj = personas.find(p => p.cluster_id === window.activePersonaFilter);
+
+        if (!activePersonaObj || window.activePersonaFilter === "all") {
+            detailsBox.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <strong style="color: #38bdf8; font-family: 'JetBrains Mono', monospace;">Aggregated View: All Discovered Personas &amp; Footprints</strong>
+                    <span class="badge-pill" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px;">GLOBAL VIEW</span>
+                </div>
+                <div style="color: #cbd5e1; font-size: 0.8rem; line-height: 1.4;">
+                    Displaying findings across all candidate branches. Conflicting namesakes and uncorroborated leads are annotated with explicit attribution badges to preserve context without false attribution.
+                </div>
+            `;
+        } else if (activePersonaObj.is_primary || activePersonaObj.cluster_id === "persona_target") {
+            detailsBox.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                    <strong style="color: #6ee7b7; font-family: 'JetBrains Mono', monospace;">Primary Target Dossier: ${escapeHtml(data.employee ? data.employee.full_name : 'Target')}</strong>
+                    <span class="badge-pill" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10px;">CORE ACTIVE</span>
+                </div>
+                <div style="color: #cbd5e1; font-size: 0.8rem; line-height: 1.4;">
+                    Showing strictly authenticated findings (exact email authentication, cryptographically verified commits, confirmed company workplace). Conflicting namesakes (e.g. Jacco Zwaan, Jurre Zwaan) are quarantined into their respective persona cards above.
+                </div>
+            `;
+        } else if (activePersonaObj.cluster_type === "NAMESAKE_COLLISION") {
+            const reasonsList = (activePersonaObj.reasons || []).map(r => `<li style="margin: 2px 0;">${escapeHtml(r)}</li>`).join("");
+            detailsBox.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; flex-wrap: wrap; gap: 6px;">
+                    <div>
+                        <strong style="color: #fbbf24; font-family: 'JetBrains Mono', monospace;">[NAMESAKE COLLISION] ${escapeHtml(activePersonaObj.cluster_label)}</strong>
+                        <div style="color: #94a3b8; font-size: 10px; font-family: 'JetBrains Mono', monospace;">STATUS: EXCLUDED FROM TARGET DOSSIER (FALSE POSITIVE GUARD)</div>
+                    </div>
+                </div>
+                <div style="color: #fde68a; font-size: 0.8rem; line-height: 1.4; margin-top: 4px;">
+                    This persona belongs to a different real-world individual sharing the same surname. It was identified during candidate handle probing but is quarantined to prevent false attribution.
+                </div>
+                <div style="margin-top: 6px;">
+                    <span style="font-size: 10px; font-weight: 700; color: #ef4444; font-family: 'JetBrains Mono', monospace;">EXCLUSION SIGNALS:</span>
+                    <ul style="margin: 2px 0 4px 16px; padding: 0; font-size: 11px; color: #f87171;">
+                        ${reasonsList || '<li>Given name contradicts target legal identity (-0.60 confidence penalty).</li>'}
+                    </ul>
+                </div>
+            `;
+        } else {
+            const reasonsList = (activePersonaObj.reasons || []).map(r => `<li style="margin: 2px 0;">${escapeHtml(r)}</li>`).join("");
+            detailsBox.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; flex-wrap: wrap; gap: 6px;">
+                    <div>
+                        <strong style="color: #38bdf8; font-family: 'JetBrains Mono', monospace;">${escapeHtml(activePersonaObj.cluster_label)}</strong>
+                        <div style="color: #94a3b8; font-size: 10px; font-family: 'JetBrains Mono', monospace;">PERSONA TYPE: ${escapeHtml(activePersonaObj.cluster_type || 'CANDIDATE')}</div>
+                    </div>
+                </div>
+                <div style="color: #cbd5e1; font-size: 0.8rem; line-height: 1.4; margin-top: 4px;">
+                    ${escapeHtml(activePersonaObj.description || 'Candidate alias persona discovered through repository commits or profile correlation.')}
+                </div>
+            `;
+        }
+    }
+}
+
+/**
+ * Updates the Target Exposure Header avatar and identity badge when an active persona filter is selected.
+ */
+function updateTargetHeaderForPersona(data) {
+    if (!data) return;
+    const activePersona = window.activePersonaFilter || "persona_target";
+    const personas = data.personas || data.all_clusters || [];
+    const activeObj = personas.find(p => p.cluster_id === activePersona);
+    const avatarEl = document.getElementById("target-avatar");
+    const targetNameEl = document.getElementById("target-name");
+    const targetEmailEl = document.getElementById("target-email-display");
+    const emp = data.employee || {};
+
+    if (!avatarEl) return;
+
+    if (activePersona === "persona_target" || activePersona === "all" || !activeObj) {
+        // Restore target primary
+        const hasRealName = emp.full_name && emp.full_name !== "Target User" && !emp.full_name.toLowerCase().startsWith("webmail");
+        if (targetNameEl) targetNameEl.innerText = hasRealName ? emp.full_name : (emp.corporate_email || currentEmail || "Target User");
+        if (targetEmailEl) targetEmailEl.innerText = emp.corporate_email || currentEmail || "";
+        if (hasRealName) {
             const initials = emp.full_name.split(" ").filter(Boolean).map(n => n[0]).join("").substring(0, 2).toUpperCase();
-            avatarEl.innerText = initials || "@";
+            avatarEl.innerHTML = `<span class="mono font-bold" style="font-size: 1.15rem; letter-spacing: 0.05em; color: #38bdf8;">${escapeHtml(initials)}</span>`;
         } else {
-            avatarEl.innerText = "@";
+            avatarEl.innerHTML = `<span class="mono font-bold" style="font-size: 1.15rem; color: #38bdf8;">@</span>`;
         }
+        avatarEl.style.borderColor = "rgba(56, 189, 248, 0.4)";
+        return;
     }
 
-    // Spillover Score Calculation & Visualization (Use Natural Risk Words, No Tiers)
-    const scoreVal = data.spillover_score ? (data.spillover_score.numeric_score ?? data.spillover_score.score) : 0;
-    const riskLevel = (data.spillover_score && data.spillover_score.level) ? data.spillover_score.level : "LOW";
-    const scoreNumEl = document.getElementById("score-number");
-    const scoreNumericBadge = document.getElementById("score-numeric-badge");
-    const scoreLevelLabel = document.getElementById("score-level-label");
+    // Candidate Persona selected: Show persona glyph and name
+    const pLabel = activeObj.cluster_label ? activeObj.cluster_label.replace(/\[.*?\]/, '').trim() : activePersona;
+    const pBadge = activeObj.badge || "CANDIDATE";
+    const isAmber = activeObj.color === "amber";
 
-    if (scoreNumEl) {
-        scoreNumEl.innerText = riskLevel === "CLEAN" ? "CLEAN" : `${riskLevel} RISK`;
-        scoreNumEl.style.color = (riskLevel === "CLEAN") ? "#10b981" : (data.spillover_score.color || "#ef4444");
-        scoreNumEl.style.fontSize = "1.85rem";
+    // Find any image associated with this persona
+    const personaImages = (data.images || []).filter(img => (img.cluster_id || img.persona_id) === activePersona);
+    if (personaImages.length > 0 && personaImages[0].image_url) {
+        avatarEl.innerHTML = `<img src="${escapeHtml(personaImages[0].image_url)}" alt="${escapeHtml(pLabel)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 6px;">`;
+    } else {
+        const initials = pLabel.replace(/^@/, '').substring(0, 2).toUpperCase();
+        avatarEl.innerHTML = `<span class="mono font-bold" style="font-size: 1.15rem; color: ${isAmber ? '#fbbf24' : '#38bdf8'};">${escapeHtml(initials)}</span>`;
     }
-    if (scoreNumericBadge) {
-        scoreNumericBadge.innerText = `SCORE: ${scoreVal}/100`;
-    }
-    if (scoreLevelLabel) {
-        scoreLevelLabel.innerText = "RISK RATING";
-    }
-
-    const badgeEl = document.getElementById("severity-badge");
-    if (badgeEl) {
-        if (riskLevel === "CLEAN" || scoreVal === 0) {
-            badgeEl.className = "badge-pill badge-clean";
-            badgeEl.innerText = "AUTHENTICATED CLEAN";
-            badgeEl.style.borderColor = "#10b981";
-            badgeEl.style.color = "#10b981";
-            badgeEl.style.background = "rgba(16, 185, 129, 0.15)";
-        } else {
-            badgeEl.className = `badge-pill ${data.spillover_score.badge_class || 'badge-high'}`;
-            badgeEl.innerText = `${riskLevel} RISK`;
-            badgeEl.style.borderColor = data.spillover_score.color || "#ef4444";
-            badgeEl.style.color = data.spillover_score.color || "#ef4444";
-            badgeEl.style.background = (data.spillover_score.color || "#ef4444") + "22";
-        }
-    }
-
-    const domBadge = document.getElementById("domain-status-badge");
-    if (domBadge) {
-        const ev = data.email_verification;
-        if (ev && ev.email_security) {
-            const prov = ev.email_security.mail_provider || ev.provider_type || "Mail Infrastructure";
-            const isSafe = ev.email_security.spoofing_risk === "PROTECTED";
-            domBadge.style.display = "inline-flex";
-            domBadge.className = isSafe ? "badge-pill badge-clean" : "badge-pill badge-medium";
-            domBadge.innerHTML = `<span class="flex items-center gap-1">${getUiIcon('mail', 'w-3 h-3 text-sky-400')} ${escapeHtml(prov)} [SPF: ${escapeHtml(ev.email_security.spf_status || 'OK')}]</span>`;
-        } else {
-            domBadge.style.display = "none";
-        }
-    }
-
-    // Render Bento Overview Cards (Multi-Item Finding Pillars)
-    renderTargetOverview(data);
+    avatarEl.style.borderColor = isAmber ? "rgba(245, 158, 11, 0.6)" : "rgba(56, 189, 248, 0.6)";
 }
 
 /**
@@ -2554,11 +3226,32 @@ function renderResultsView(data, email) {
 function renderTargetOverview(data) {
     if (!data) return;
 
+    // 0. Breaches & Stealer Logs Badge
+    const badgeStealers = document.getElementById("badge-lock-stealers");
+    if (badgeStealers) {
+        const leaks = data.leaks || [];
+        const stealers = leaks.filter(l => {
+            const name = (l.leak_name || "").toLowerCase();
+            return name.includes("stealer") || name.includes("redline") || name.includes("vidar") || name.includes("lumma") || name.includes("raccoon") || name.includes("meta");
+        });
+        if (stealers.length > 0) {
+            badgeStealers.innerText = `[${stealers.length} MALWARE]`;
+            badgeStealers.className = "badge-lock critical";
+        } else if (leaks.length > 0) {
+            badgeStealers.innerText = `[${leaks.length} BREACHES]`;
+            badgeStealers.className = "badge-lock warning";
+        } else {
+            badgeStealers.innerText = "[CLEAN]";
+            badgeStealers.className = "badge-lock clean";
+        }
+    }
+
     // 1. Credentials & Hashes List
     const credsList = document.getElementById("summary-creds-list");
     const badgeCreds = document.getElementById("badge-lock-creds");
     if (credsList) {
         const creds = data.credentials || [];
+        const disclosures = data.password_disclosures || [];
         if (creds.length > 0) {
             if (badgeCreds) {
                 badgeCreds.innerText = `[${creds.length} EXPOSED]`;
@@ -2571,13 +3264,29 @@ function renderTargetOverview(data) {
                 return `
                     <div class="finding-item-row">
                         <div class="finding-item-top">
-                            <span class="finding-item-val mono" style="${isHash ? 'color: #fde047; font-size: 0.72rem;' : 'color: #f87171;'}">${escapeHtml(val)}</span>
+                            <span class="finding-item-val mono" style="${isHash ? 'color: #c084fc; font-size: 0.72rem;' : 'color: #f87171;'}">${escapeHtml(val)}</span>
                             <span class="finding-item-badge">${escapeHtml(service)}</span>
                         </div>
                         ${c.username_or_email ? `<div class="finding-item-sub mono text-zinc-400">User: ${escapeHtml(c.username_or_email)}</div>` : ''}
                     </div>
                 `;
             }).join("");
+        } else if (disclosures.length > 0) {
+            if (badgeCreds) {
+                badgeCreds.innerText = `[${disclosures.length} DISCLOSED]`;
+                badgeCreds.className = "badge-lock warning";
+            }
+            credsList.innerHTML = disclosures.slice(0, 3).map(d => {
+                return `
+                    <div class="finding-item-row">
+                        <div class="finding-item-top">
+                            <span class="finding-item-val mono" style="color: #fbbf24; font-size: 0.72rem;">[PASSWORD COMPROMISED]</span>
+                            <span class="finding-item-badge" style="background: rgba(245, 158, 11, 0.15); color: #fde68a; border-color: rgba(245, 158, 11, 0.3);">${escapeHtml(d.leak_name)}</span>
+                        </div>
+                        <div class="finding-item-sub mono text-zinc-400">Payload not distributed by public API • Import dump to view</div>
+                    </div>
+                `;
+            }).join("") + (disclosures.length > 3 ? `<div style="font-size: 0.7rem; color: var(--t-muted); text-align: center; margin-top: 4px;">+ ${disclosures.length - 3} more password breaches in Credentials tab</div>` : '');
         } else {
             if (badgeCreds) {
                 badgeCreds.innerText = "[CLEAN]";
@@ -2586,6 +3295,7 @@ function renderTargetOverview(data) {
             credsList.innerHTML = `<div class="finding-empty-val mono">Zero credentials exposed in indexed dumps</div>`;
         }
     }
+
 
     // 2. Geolocation & Physical Coordinates (Corroborated Municipalities & Anchors)
     const locList = document.getElementById("summary-locations-list");
@@ -2827,7 +3537,17 @@ function renderSingleVector(barId, valId, subId, vectorData) {
         bar.style.background = c;
     }
     if (val && vectorData) {
-        val.innerText = `${vectorData.score}`;
+        const s = vectorData.score || "";
+        val.innerText = `${s}`;
+        if (s === "CRITICAL") { val.style.color = "#f87171"; }
+        else if (s === "HIGH") { val.style.color = "#fb923c"; }
+        else if (s === "MEDIUM") { val.style.color = "#facc15"; }
+        else if (s === "LOW") { val.style.color = "#38bdf8"; }
+        else { val.style.color = "#34d399"; }
+    }
+    const legacyVal = document.getElementById(`${barId}-val`);
+    if (legacyVal && vectorData) {
+        legacyVal.innerText = `${vectorData.score}`;
     }
     if (sub && vectorData) {
         sub.innerText = vectorData.details;
@@ -2933,7 +3653,10 @@ function renderEvidenceTabs(data) {
                                 <div class="drawer-payload-shell mono">
                                     <pre style="margin: 0; white-space: pre-wrap; word-break: break-all;">${escapeHtml(JSON.stringify(leak, null, 2))}</pre>
                                 </div>
-                                <div class="drawer-actions-row">
+                                <div class="drawer-actions-row" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <button type="button" class="btn-action-tool" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1);" onclick="event.stopPropagation(); focusGraphOnEntity('leak', '${escapeHtml(leak.leak_name)}')">
+                                        Locate on Graph ⌖
+                                    </button>
                                     <button type="button" class="btn-action-tool" onclick="event.stopPropagation(); copyToClipboard('${escapeHtml(JSON.stringify(leak))}', 'Breach Payload')">
                                         Copy Payload JSON
                                     </button>
@@ -2953,33 +3676,280 @@ function renderEvidenceTabs(data) {
         }
     }
 
-    // 2. Credentials
+    // 2. Credentials Tab Content
     const credsContainer = document.getElementById("tab-creds-content");
     if (credsContainer) {
         credsContainer.innerHTML = "";
-        if (!data.credentials || data.credentials.length === 0) {
-            credsContainer.innerHTML = `
-                <div class="evidence-card" style="border-left: 3px solid #10b981;">
-                    <div class="evidence-title font-mono" style="color: #34d399;">[STATUS: CREDENTIALS UNCOMPROMISED]</div>
-                    <div class="evidence-body" style="margin-top: 0.3rem;">No plaintext passwords or cryptographic hashes associated with this address.</div>
-                </div>`;
-        } else {
-            data.credentials.forEach(cred => {
-                const corpBadge = cred.is_corporate_password_match
-                    ? `<div class="warning-callout mono text-xs">[POLICY MATCH] Plaintext match to corporate policy! Critical account takeover risk.</div>`
-                    : "";
+        const allCreds = data.credentials || [];
+        const rawPlaintextCreds = allCreds.filter(c => Boolean(c.plaintext_password));
+        const hashedCreds = allCreds.filter(c => !c.plaintext_password && Boolean(c.password_hash));
 
-                let freqHtml = "";
-                if (cred.global_frequency && cred.global_frequency > 0) {
-                    freqHtml = `
-                        <div style="margin-top: 0.35rem; font-size: 0.72rem; color: #f87171; font-family: var(--font-mono);">
-                            [HIBP K-ANONYMITY] Observed across <strong>${cred.global_frequency.toLocaleString()}</strong> publicly leaked breach databases worldwide.
+        // Recover password disclosures either from API response or fallback scan of leaks
+        let passwordDisclosures = data.password_disclosures || [];
+        if (!passwordDisclosures || passwordDisclosures.length === 0) {
+            const leaksWithCreds = new Set(allCreds.map(c => c.leak_id).filter(Boolean));
+            const leaksWithCredsNames = new Set(allCreds.map(c => (c.leak_name || "").toLowerCase().trim()).filter(Boolean));
+            (data.leaks || []).forEach(lk => {
+                const exp = (lk.exposed_data || []).map(x => String(x).toLowerCase());
+                if (exp.some(x => x.includes("password"))) {
+                    const lkId = lk.id;
+                    const lkName = (lk.leak_name || "").trim();
+                    if (!leaksWithCreds.has(lkId) && !leaksWithCredsNames.has(lkName.toLowerCase())) {
+                        passwordDisclosures.push({
+                            leak_id: lkId,
+                            leak_name: lkName,
+                            breach_date: lk.breach_date,
+                            threat_actor_source: lk.threat_actor_source || "XposedOrNot / HIBP Verified Intelligence",
+                            severity: lk.severity || "HIGH",
+                            exposed_data: lk.exposed_data || [],
+                            reason_undelivered: "The breach notification index (HaveIBeenPwned / XposedOrNot) officially verifies that passwords were compromised in this incident. However, public breach verification APIs legally only publish compromise notices and do NOT distribute raw passwords or hashes. To inspect the exact secret from this breach, download the authentic raw dump or combolist and import it into the local database."
+                        });
+                    }
+                }
+            });
+        }
+
+        const totalIssues = rawPlaintextCreds.length + hashedCreds.length + passwordDisclosures.length;
+
+        // Render Active Public Leak Engines Status Ribbon
+        const engines = data.public_leak_engines || [];
+        let enginesRibbonHtml = '';
+        if (engines && engines.length > 0) {
+            const activeCount = engines.filter(e => e.is_active).length;
+            enginesRibbonHtml = `
+            <div class="evidence-card" style="background: rgba(15, 23, 42, 0.45); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px; padding: 12px 14px; margin-bottom: 1.25rem;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span class="mono" style="font-weight: 700; font-size: 0.85rem; color: #38bdf8;">[PUBLIC LEAK DATABASES &amp; THREAT FEEDS]</span>
+                        <span class="badge-pill mono" style="font-size: 0.65rem; background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35);">${activeCount} / ${engines.length} ENGINES ONLINE</span>
+                    </div>
+                    <span style="font-size: 0.72rem; color: var(--t-secondary);" class="mono">Multi-Stream Threat Aggregator</span>
+                </div>
+                <div style="font-size: 0.72rem; color: var(--t-secondary); margin-bottom: 10px; line-height: 1.4;">
+                    Scans live across public breach registers, infostealer malware logs, $k$-Anonymity global hash lakes, and open paste combolists simultaneously during every target pivot.
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px;">
+                    ${engines.map(eng => `
+                        <div class="mono" style="font-size: 0.72rem; padding: 6px 10px; border-radius: 4px; background: var(--c-surface); border: 1px solid ${eng.is_active ? 'rgba(16, 185, 129, 0.35)' : 'rgba(148, 163, 184, 0.2)'}; display: flex; flex-direction: column; gap: 3px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: ${eng.is_active ? '#10b981' : '#94a3b8'}; box-shadow: ${eng.is_active ? '0 0 6px rgba(16, 185, 129, 0.6)' : 'none'};"></span>
+                                    <strong style="color: ${eng.is_active ? 'var(--t-primary)' : 'var(--t-secondary)'}; font-size: 0.74rem;">${escapeHtml(eng.name)}</strong>
+                                </div>
+                                <span class="badge-pill" style="font-size: 0.6rem; ${eng.is_active ? 'background: rgba(16, 185, 129, 0.15); color: #10b981;' : 'background: rgba(148, 163, 184, 0.1); color: #94a3b8;'}">${eng.is_active ? 'ONLINE' : 'OPTIONAL'}</span>
+                            </div>
+                            <div style="font-size: 0.68rem; color: var(--t-muted); font-family: var(--font-sans);">${escapeHtml(eng.description)}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            `;
+        }
+
+        const connectedStrings = data.connected_strings_audit || [];
+        let connectedStringsHtml = `
+            <div class="evidence-card" style="background: var(--c-surface); border: 1px solid var(--b-hairline); margin-bottom: 1.25rem;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 0.6rem;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-weight: 700; font-size: 0.88rem; color: #38bdf8; letter-spacing: 0.03em;">[ALL STRINGS CONNECTED TO TARGET IDENTITY &amp; SELF-AUDIT]</span>
+                            <span class="badge-pill mono" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35);">${connectedStrings.length} STRINGS DETECTED</span>
+                        </div>
+                        <div style="font-size: 0.73rem; color: var(--t-secondary); margin-top: 3px;">
+                            Live forensic analysis of candidate strings connected to this identity (base handles, 2019/2020 legacy phrases, and exfiltrations) evaluated against the HIBP <em>k</em>-Anonymity global database across 800M+ real-world leaks.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Self-Audit Quick Bar -->
+                <div style="padding: 0.75rem; background: var(--c-elevated); border: 1px solid var(--b-hairline); border-radius: 4px; margin-bottom: 0.85rem;">
+                    <div style="font-size: 0.74rem; font-weight: 600; color: var(--t-primary); margin-bottom: 6px;">
+                        Recall an old password phrase from 2019 or prior? Self-audit its global exposure instantly:
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <input type="text" id="self-audit-pwd-input" class="form-input mono" placeholder="Type password or phrase to self-audit (e.g. filipos2019!)..." style="flex: 1; min-width: 220px; font-size: 0.8rem; padding: 6px 10px; background: var(--c-surface); border: 1px solid var(--b-hairline); color: var(--t-primary); border-radius: 4px;" onkeydown="if(event.key==='Enter') executePasswordSelfAudit();">
+                        <button type="button" class="btn-primary mono" style="font-size: 0.75rem; padding: 6px 14px; background: #0284c7; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 700;" onclick="executePasswordSelfAudit()">AUDIT PHRASE</button>
+                    </div>
+
+                    ${connectedStrings.length > 0 ? `
+                        <div style="margin-top: 8px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                            <span style="font-size: 0.7rem; color: var(--t-muted); font-weight: 600;">QUICK AUDIT CONNECTED STRINGS:</span>
+                            ${connectedStrings.slice(0, 10).map(s => `
+                                <button type="button" class="btn-chip mono" style="font-size: 0.68rem; padding: 2px 7px; background: var(--c-surface); border: 1px solid var(--b-hairline); color: var(--t-secondary); border-radius: 3px; cursor: pointer;" onclick="selectSelfAuditPhrase('${escapeHtml(s.password)}')">
+                                    ${escapeHtml(s.password)} <span style="color: ${s.global_frequency > 0 ? '#f87171' : '#34d399'}; font-weight: 700;">(${s.global_frequency > 0 ? s.global_frequency.toLocaleString() : '0'})</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+
+                    <div id="self-audit-live-result" style="display: none;"></div>
+                </div>
+
+                <!-- Connected Strings Matrix Table -->
+                ${connectedStrings.length > 0 ? `
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.74rem;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid var(--b-hairline); text-align: left; color: var(--t-muted);">
+                                    <th style="padding: 6px 8px;">CONNECTED STRING</th>
+                                    <th style="padding: 6px 8px;">HIBP GLOBAL LEAKS</th>
+                                    <th style="padding: 6px 8px;">ENTROPY &amp; KEYSPACE</th>
+                                    <th style="padding: 6px 8px;">PATTERN</th>
+                                    <th style="padding: 6px 8px;">SPILLOVER RISK</th>
+                                    <th style="padding: 6px 8px; text-align: right;">ACTION</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${connectedStrings.map(s => {
+            const freqText = s.global_frequency > 0
+                ? `<span style="color: #f87171; font-weight: 700;">${s.global_frequency.toLocaleString()} Leaks</span>`
+                : `<span style="color: #34d399;">0 Leaks (Clean)</span>`;
+            const riskColor = s.tier_color || (s.spillover_risk_score > 60 ? '#ef4444' : (s.spillover_risk_score > 35 ? '#eab308' : '#38bdf8'));
+            return `
+                                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                                            <td style="padding: 6px 8px;">
+                                                <code style="font-weight: 700; color: #f87171; font-size: 0.78rem;">${escapeHtml(s.password)}</code>
+                                            </td>
+                                            <td style="padding: 6px 8px;">${freqText}</td>
+                                            <td style="padding: 6px 8px; color: var(--t-secondary);">
+                                                ${s.keyspace_entropy_bits} bits <span style="font-size: 0.68rem; color: var(--t-muted);">(${escapeHtml((s.complexity_rating || '').split(' ')[0])})</span>
+                                            </td>
+                                            <td style="padding: 6px 8px; color: var(--t-secondary);">${escapeHtml(s.pattern || '')}</td>
+                                            <td style="padding: 6px 8px;">
+                                                <span class="badge-pill mono" style="font-size: 0.65rem; background: rgba(255,255,255,0.05); color: ${riskColor}; border: 1px solid ${riskColor};">
+                                                    ${s.spillover_risk_score}/100 ${escapeHtml((s.spillover_risk_tier || '').split(' ')[0])}
+                                                </span>
+                                            </td>
+                                            <td style="padding: 6px 8px; text-align: right;">
+                                                <button type="button" class="btn-copy-mini mono" onclick="selectSelfAuditPhrase('${escapeHtml(s.password)}')">Audit</button>
+                                            </td>
+                                        </tr>
+                                    `;
+        }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        let ledgerHtml = "";
+        if (totalIssues === 0) {
+            ledgerHtml = `
+                <div class="evidence-card" style="border-left: 3px solid #10b981;">
+                    <div class="evidence-title font-mono" style="color: #34d399;">[STATUS: CREDENTIALS FULLY UNCOMPROMISED IN LOCAL LEDGER]</div>
+                    <div class="evidence-body" style="margin-top: 0.35rem; color: var(--t-secondary); font-size: 0.8rem;">
+                        No plaintext passwords, cryptographic hashes, or confirmed breach password disclosures were detected for this identity across local indexed databases.
+                    </div>
+                </div>`;
+            credsContainer.innerHTML = connectedStringsHtml + ledgerHtml;
+        } else {
+            // Summary Header Ribbon
+            let sectionsHtml = `
+                <div class="evidence-card" style="background: var(--c-surface); border: 1px solid var(--b-hairline); margin-bottom: 1rem;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-weight: 700; font-size: 0.88rem; color: var(--t-primary); letter-spacing: 0.02em;">CREDENTIAL INTELLIGENCE LEDGER</span>
+                            <span class="badge-pill mono" style="font-size: 0.68rem; background: var(--c-elevated); color: var(--t-secondary); border: 1px solid var(--b-hairline);">PROVENANCE & ORIGIN TRACKER</span>
+                        </div>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <span class="badge-pill mono" style="font-size: 0.7rem; ${rawPlaintextCreds.length > 0 ? 'background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);' : 'background: var(--c-elevated); color: var(--t-muted);'}">
+                                ${rawPlaintextCreds.length} RAW SECRETS
+                            </span>
+                            <span class="badge-pill mono" style="font-size: 0.7rem; ${hashedCreds.length > 0 ? 'background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);' : 'background: var(--c-elevated); color: var(--t-muted);'}">
+                                ${hashedCreds.length} HASHED DIGESTS
+                            </span>
+                            <span class="badge-pill mono" style="font-size: 0.7rem; ${passwordDisclosures.length > 0 ? 'background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);' : 'background: var(--c-elevated); color: var(--t-muted);'}">
+                                ${passwordDisclosures.length} DISCLOSURES PENDING IMPORT
+                            </span>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.74rem; color: var(--t-secondary); margin-top: 0.45rem; line-height: 1.4;">
+                        This ledger categorizes credentials by their exact technical state: authentic raw cleartext exfiltrated by stealers, cryptographic hashes stored by services prior to breach, and verified breach disclosures whose payloads reside in full dumps rather than public API metadata.
+                    </div>
+                </div>
+            `;
+
+            // SECTION 1: RAW PLAINTEXT SECRETS
+            if (rawPlaintextCreds.length > 0) {
+                sectionsHtml += `
+                    <div style="margin: 1.25rem 0 0.5rem 0; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="mono" style="font-size: 0.8rem; font-weight: 700; color: #f87171; letter-spacing: 0.05em;">[1. RAW EXFILTRATED SECRETS • CLEARTEXT]</span>
+                            <span class="badge-pill mono" style="font-size: 0.65rem; background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3);">UNENCRYPTED PAYLOAD</span>
+                        </div>
+                        <span style="font-size: 0.72rem; color: var(--t-secondary);">${rawPlaintextCreds.length} Compromised Account${rawPlaintextCreds.length > 1 ? 's' : ''}</span>
+                    </div>
+                `;
+
+                rawPlaintextCreds.forEach(cred => {
+                    const corpBadge = cred.is_corporate_password_match
+                        ? `<div class="warning-callout mono text-xs">[POLICY MATCH] Plaintext match to corporate policy! Critical account takeover risk.</div>`
+                        : "";
+
+                    let freqHtml = "";
+                    if (cred.global_frequency && cred.global_frequency > 0) {
+                        freqHtml = `
+                            <div style="margin-top: 0.35rem; font-size: 0.72rem; color: #f87171; font-family: var(--font-mono);">
+                                [HIBP K-ANONYMITY] Observed across <strong>${cred.global_frequency.toLocaleString()}</strong> publicly leaked breach databases worldwide.
+                            </div>
+                        `;
+                    }
+
+                    sectionsHtml += `
+                        <div class="evidence-card" style="border-left: 3px solid #ef4444; margin-bottom: 0.8rem;">
+                            <div class="evidence-header">
+                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <span class="badge-pill mono" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; font-size: 0.68rem; font-weight: 700;">[RAW EXFILTRATED SECRET]</span>
+                                    <span class="evidence-title">User: ${escapeHtml(cred.username_or_email)}</span>
+                                </div>
+                                <span class="evidence-tag" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3);">${escapeHtml(cred.leak_name)}</span>
+                            </div>
+                            <div class="evidence-body">
+                                <div style="margin-bottom: 0.5rem; padding: 0.65rem 0.85rem; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 4px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                            <span style="color: var(--t-secondary); font-size: 0.78rem;">Compromised Plaintext Secret:</span>
+                                            <span class="code-field mono" style="color: #f87171; font-weight: 700; font-size: 1rem; background: rgba(239, 68, 68, 0.15); padding: 3px 10px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.35); letter-spacing: 0.03em;">${escapeHtml(cred.plaintext_password)}</span>
+                                        </div>
+                                        <div style="display: flex; gap: 4px;">
+                                            <button type="button" class="btn-copy-mini mono" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1);" onclick="focusGraphOnEntity('credential', '${escapeHtml(cred.plaintext_password)}')">Graph ⌖</button>
+                                            <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(cred.plaintext_password)}', 'Raw Password')">Copy Secret</button>
+                                        </div>
+                                    </div>
+                                    <div style="margin-top: 0.4rem; font-size: 0.72rem; color: #fca5a5; line-height: 1.35;">
+                                        <strong>Exposure Vector:</strong> ${escapeHtml(cred.why_status || 'Secret was exfiltrated in unencrypted cleartext directly from malware infection logs or plain database dumps. No cryptographic hashing was applied.')}
+                                    </div>
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; font-size: 0.75rem; color: var(--t-secondary); margin-top: 0.4rem;">
+                                    <div><strong>Where it came from:</strong> <span style="color: var(--t-primary);">${escapeHtml(cred.leak_name)}</span></div>
+                                    <div><strong>Exfiltration Source:</strong> <span style="color: var(--t-primary);">${escapeHtml(cred.threat_actor_source || cred.origin_description || 'Darknet Market / Ingestion')}</span></div>
+                                    <div><strong>Compromised Domain:</strong> <code>${escapeHtml(cred.domain_compromised || 'N/A')}</code></div>
+                                    <div><strong>Incident Date:</strong> <span>${escapeHtml(cred.breach_date || 'N/A')}</span></div>
+                                </div>
+                                ${cred.password_pattern ? `<div style="margin-top: 0.35rem; font-size: 0.73rem;">Pattern Analysis: <code>${escapeHtml(cred.password_pattern)}</code></div>` : ''}
+                                ${freqHtml}
+                            </div>
+                            ${corpBadge}
                         </div>
                     `;
-                }
+                });
+            }
 
-                let hashBlockHtml = "";
-                if (cred.password_hash) {
+            // SECTION 2: CRYPTOGRAPHICALLY HASHED SECRETS
+            if (hashedCreds.length > 0) {
+                sectionsHtml += `
+                    <div style="margin: 1.25rem 0 0.5rem 0; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="mono" style="font-size: 0.8rem; font-weight: 700; color: #a5b4fc; letter-spacing: 0.05em;">[2. CRYPTOGRAPHICALLY HASHED SECRETS • ONE-WAY DIGESTS]</span>
+                            <span class="badge-pill mono" style="font-size: 0.65rem; background: rgba(99, 102, 241, 0.15); color: #c7d2fe; border: 1px solid rgba(99, 102, 241, 0.3);">REQUIRES CRACKING</span>
+                        </div>
+                        <span style="font-size: 0.72rem; color: var(--t-secondary);">${hashedCreds.length} Stored Hash${hashedCreds.length > 1 ? 'es' : ''}</span>
+                    </div>
+                `;
+
+                hashedCreds.forEach(cred => {
                     const hi = cred.hash_intel || {};
                     const algo = hi.algorithm || "Hash";
                     const crackability = hi.crackability || "FAST CRACK EVALUATION";
@@ -2988,7 +3958,7 @@ function renderEvidenceTabs(data) {
                         ? "background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444;"
                         : "background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3);";
 
-                    hashBlockHtml = `
+                    const hashBlockHtml = `
                         <div style="margin-top: 0.45rem; padding: 8px 10px; background: var(--c-elevated); border: 1px solid var(--b-hairline); border-radius: 4px;">
                             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;">
                                 <div style="display: flex; align-items: center; gap: 6px;">
@@ -2996,6 +3966,7 @@ function renderEvidenceTabs(data) {
                                     <span class="badge-pill mono" style="font-size: 0.68rem; background: var(--c-surface); color: var(--t-secondary); border: 1px solid var(--b-hairline);">${escapeHtml(crackability)}</span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 4px;">
+                                    <button type="button" class="btn-copy-mini mono" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1);" onclick="focusGraphOnEntity('credential', '${escapeHtml(cred.password_hash)}')">Graph ⌖</button>
                                     <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(cred.password_hash)}', 'Password Hash')">Copy Hash</button>
                                     <button type="button" class="btn-copy-mini mono" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border-color: rgba(168, 85, 247, 0.35);" onclick="resolveCredentialHash('${escapeHtml(cred.password_hash)}', this)">Resolve Hash</button>
                                 </div>
@@ -3006,48 +3977,119 @@ function renderEvidenceTabs(data) {
                             <div class="hash-result-slot" style="display: none; margin-top: 6px;"></div>
                         </div>
                     `;
-                }
 
-                let secretHtml = `
-                    <div style="margin-bottom: 0.4rem; padding: 0.4rem 0.6rem; background: var(--accent-emerald-subtle); border-left: 3px solid var(--accent-emerald); border-radius: 4px; font-size: 0.75rem; color: var(--accent-emerald);">
-                        [UNMASKED INTEL] Plaintext secret exposed in clear text.
+                    sectionsHtml += `
+                        <div class="evidence-card" style="border-left: 3px solid #6366f1; margin-bottom: 0.8rem;">
+                            <div class="evidence-header">
+                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <span class="badge-pill mono" style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid #6366f1; font-size: 0.68rem; font-weight: 700;">[CRYPTOGRAPHIC HASH]</span>
+                                    <span class="evidence-title">User: ${escapeHtml(cred.username_or_email)}</span>
+                                </div>
+                                <span class="evidence-tag" style="background: rgba(99, 102, 241, 0.15); color: #c7d2fe; border: 1px solid rgba(99, 102, 241, 0.3);">${escapeHtml(cred.leak_name)}</span>
+                            </div>
+                            <div class="evidence-body">
+                                <div style="margin-bottom: 0.45rem; padding: 0.55rem 0.75rem; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 4px; font-size: 0.73rem; color: #c7d2fe; line-height: 1.4;">
+                                    <strong>Cryptographic Hashing Reason:</strong> ${escapeHtml(cred.why_status || 'The service properly salted and hashed passwords prior to the breach. The original cleartext was NOT stored in the database. Resolving plaintext requires lookup table inversion or offline GPU cluster cracking.')}
+                                </div>
+
+                                ${hashBlockHtml}
+
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; font-size: 0.75rem; color: var(--t-secondary); margin-top: 0.4rem;">
+                                    <div><strong>Where it came from:</strong> <span style="color: var(--t-primary);">${escapeHtml(cred.leak_name)}</span></div>
+                                    <div><strong>Exfiltration Source:</strong> <span style="color: var(--t-primary);">${escapeHtml(cred.threat_actor_source || 'SQL Injection / Database Dump')}</span></div>
+                                    <div><strong>Compromised Domain:</strong> <code>${escapeHtml(cred.domain_compromised || 'N/A')}</code></div>
+                                    <div><strong>Incident Date:</strong> <span>${escapeHtml(cred.breach_date || 'N/A')}</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+
+            // SECTION 3: BREACH PASSWORD DISCLOSURES (COMPROMISE CONFIRMED, PAYLOAD UNDELIVERED)
+            if (passwordDisclosures.length > 0) {
+                sectionsHtml += `
+                    <div style="margin: 1.25rem 0 0.5rem 0; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="mono" style="font-size: 0.8rem; font-weight: 700; color: #fbbf24; letter-spacing: 0.05em;">[3. CONFIRMED BREACH DISCLOSURES • PAYLOAD NOT DELIVERED]</span>
+                            <span class="badge-pill mono" style="font-size: 0.65rem; background: rgba(245, 158, 11, 0.15); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.3);">METADATA DISCLOSED</span>
+                        </div>
+                        <span style="font-size: 0.72rem; color: var(--t-secondary);">${passwordDisclosures.length} Incident${passwordDisclosures.length > 1 ? 's' : ''}</span>
                     </div>
-                    ${cred.plaintext_password ? `<div>Compromised Password: <span class="code-field mono" style="color: #f87171; font-weight: 700;">${escapeHtml(cred.plaintext_password)}</span> <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(cred.plaintext_password)}', 'Password')">Copy</button></div>` : ''}
-                    ${hashBlockHtml}
+
+                    <div class="evidence-card" style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.25); margin-bottom: 0.85rem; padding: 0.75rem 1rem;">
+                        <div style="font-weight: 700; font-size: 0.78rem; color: #fbbf24; margin-bottom: 0.3rem; display: flex; align-items: center; gap: 6px;">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                            WHY THE EXACT PASSWORD IS NOT DISPLAYED FOR THESE INCIDENTS:
+                        </div>
+                        <div style="font-size: 0.74rem; color: #fde68a; line-height: 1.45;">
+                            Breach notification indexes (such as <strong>HaveIBeenPwned</strong> and <strong>XposedOrNot</strong>) officially verify that user passwords were compromised in the breaches listed below. However, public threat indexes and free OSINT APIs <em>only publish compromise verification notices</em> and <strong>legally do not distribute raw password strings or hash dumps</strong> to protect user privacy. To view the exact password or hash from these incidents, download the authentic public leak archive / combolist and import it into BreachSpillover's local database.
+                        </div>
+                    </div>
                 `;
 
+                passwordDisclosures.forEach(disc => {
+                    const exposedBadges = (disc.exposed_data || []).map(d => {
+                        const isPwd = String(d).toLowerCase().includes("password");
+                        const style = isPwd
+                            ? "background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.35); font-weight: 600;"
+                            : "background: var(--c-surface); color: var(--t-secondary); border: 1px solid var(--b-hairline);";
+                        return `<span class="badge-pill mono" style="font-size: 0.65rem; ${style} margin-right: 4px; margin-top: 2px; display: inline-block;">${escapeHtml(d)}</span>`;
+                    }).join('');
 
-                credsContainer.innerHTML += `
-                    <div class="evidence-card">
-                        <div class="evidence-header">
-                            <span class="evidence-title">User: ${escapeHtml(cred.username_or_email)}</span>
-                            <span class="evidence-tag" style="background: rgba(234, 179, 8, 0.2); color: #fde047; border: 1px solid #eab308;">${escapeHtml(cred.leak_name)}</span>
+                    sectionsHtml += `
+                        <div class="evidence-card" style="border-left: 3px solid #f59e0b; margin-bottom: 0.75rem;">
+                            <div class="evidence-header">
+                                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <span class="badge-pill mono" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; font-size: 0.68rem; font-weight: 700;">[PASSWORD COMPROMISED • PAYLOAD NOT DELIVERED]</span>
+                                    <span class="evidence-title">Account: ${escapeHtml(currentEmail || 'Target Identity')}</span>
+                                </div>
+                                <span class="evidence-tag" style="background: rgba(245, 158, 11, 0.15); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.35);">${escapeHtml(disc.leak_name)}</span>
+                            </div>
+                            <div class="evidence-body">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; font-size: 0.75rem; color: var(--t-secondary);">
+                                    <div><strong>Where it came from:</strong> <span style="color: var(--t-primary);">${escapeHtml(disc.leak_name)}</span></div>
+                                    <div><strong>Intelligence Source:</strong> <span style="color: var(--t-primary);">${escapeHtml(disc.threat_actor_source || 'Live Threat Index')}</span></div>
+                                    <div><strong>Incident Date:</strong> <span>${escapeHtml(disc.breach_date || 'N/A')}</span></div>
+                                    <div><strong>Breach Severity:</strong> <span style="color: #fbbf24; font-weight: 600;">${escapeHtml(disc.severity || 'HIGH')}</span></div>
+                                </div>
+
+                                <div style="margin-top: 0.45rem; font-size: 0.73rem; color: var(--t-secondary);">
+                                    <strong style="color: var(--t-primary);">Compromised Data Classes:</strong>
+                                    <div style="margin-top: 3px;">${exposedBadges}</div>
+                                </div>
+
+                                <div style="margin-top: 0.5rem; padding: 0.5rem 0.7rem; background: var(--c-elevated); border: 1px dashed rgba(245, 158, 11, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                                    <div style="font-size: 0.72rem; color: #fde68a; line-height: 1.35;">
+                                        <strong>Reason not shown:</strong> Public threat indexes confirm passwords were leaked, but do not distribute the raw password strings.
+                                    </div>
+                                    <button type="button" class="btn-copy-mini mono" style="background: rgba(245, 158, 11, 0.15); color: #fde68a; border-color: rgba(245, 158, 11, 0.35);" onclick="showToast('To unmask this password, download the ${escapeHtml(disc.leak_name)} dump and place it in the local database.', 'info')">
+                                        Ingest Dump to Unmask
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <div class="evidence-body">
-                            ${secretHtml}
-                            ${cred.password_pattern ? `<div style="margin-top: 0.25rem;">Pattern Analysis: <code>${escapeHtml(cred.password_pattern)}</code></div>` : ''}
-                            <div style="margin-top: 0.25rem;">Target Domain: <code>${escapeHtml(cred.domain_compromised || 'N/A')}</code></div>
-                            ${freqHtml}
-                        </div>
-                        ${corpBadge}
-                    </div>
-                `;
-            });
+                    `;
+                });
+            }
+
+            credsContainer.innerHTML = enginesRibbonHtml + connectedStringsHtml + sectionsHtml;
         }
     }
+
 
     const targetFullName = (data.employee && data.employee.full_name) ? data.employee.full_name : "";
 
     // 3. Pivots & Public OSINT Footprint
     const allPivots = data.pivots || [];
-    const rawSuspectedPivots = allPivots.filter(p =>
-        p.pivot_type === "SUSPECTED_ACCOUNT" ||
-        (p.context_note && p.context_note.includes("[STATUS: SUSPECTED]")) ||
-        (p.context_note && p.context_note.includes("[PLATFORM: UNCONFIRMED]")) ||
-        (p.confidence_score !== undefined && p.confidence_score < 0.85 && p.pivot_type !== "EDUCATION" && p.pivot_type !== "WORKPLACE" && p.pivot_type !== "TIMELINE" && p.pivot_type !== "TECH_STACK" && p.pivot_type !== "FLAGSHIP_PROJECT") ||
-        (p.pivot_type === "PERSONA_PIVOT" && !p.pivot_value.toLowerCase().includes("esport") && !p.pivot_value.toLowerCase().includes("gamertag"))
-    );
-    const verifiedPivots = allPivots.filter(p => !rawSuspectedPivots.includes(p));
+    const activePersona = window.activePersonaFilter || "persona_target";
+    let effectivePivots = allPivots;
+    if (activePersona !== "all") {
+        effectivePivots = allPivots.filter(p => (p.persona_id || p.cluster_id || "persona_target") === activePersona);
+    }
+
+    const rawSuspectedPivots = effectivePivots.filter(p => isCandidateLedgerPivot(p));
+    const verifiedPivots = effectivePivots.filter(p => !rawSuspectedPivots.includes(p) && !isVisualMediaPivot(p));
 
     // Platforms that already have a verified PUBLIC_PROFILE (e.g. GitHub: @sazeku123, Steam: @sazeku)
     const fullyResolvedPlatforms = new Set(
@@ -3144,17 +4186,38 @@ function renderEvidenceTabs(data) {
                     tiePillHtml = `<span class="pivot-tie-pill">[TIED: ${escapeHtml(tieMatch[1])}]</span>`;
                 }
 
-                // Embed category pill and tie pill cleanly into .evidence-header alongside .evidence-tag
+                // Determine provenance origin step
+                let provStepId = "step_3_recon";
+                let provLabel = "Step 3: Live OSINT";
+                const textLow = fullText.toLowerCase();
+                if (textLow.includes("cardinal") || textLow.includes("corroborat") || textLow.includes("employer:") || textLow.includes("role:") || textLow.includes("alma mater")) {
+                    provStepId = "step_4_synthesis";
+                    provLabel = "Step 4: AI Cardinal";
+                } else if (textLow.includes("avatar") || textLow.includes("face") || textLow.includes("photograph")) {
+                    provStepId = "step_6_visual";
+                    provLabel = "Step 6: Face Arbitration";
+                } else if (textLow.includes("linkedin") || textLow.includes("facebook") || textLow.includes("waterfall") || textLow.includes("playwright")) {
+                    provStepId = "step_5_browser";
+                    provLabel = "Step 5: Browser Runner";
+                } else if (textLow.includes("breach") || textLow.includes("stealer") || textLow.includes("malware")) {
+                    provStepId = "step_2_breaches";
+                    provLabel = "Step 2: Threat Intel";
+                }
+                const provBtnHtml = `<button type="button" class="pivot-provenance-btn mono" onclick="openProvenanceConsole('${provStepId}')" title="Inspect provenance journey in Execution Console">${provLabel} &rarr;</button>`;
+                const pivotTargetVal = (typeof piv !== 'undefined' && piv && piv.pivot_value) ? piv.pivot_value : '';
+                const graphBtnHtml = pivotTargetVal ? `<button type="button" class="pivot-provenance-btn mono" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1);" onclick="focusGraphOnEntity('pivot', '${escapeHtml(pivotTargetVal)}')" title="Center camera on this pivot in graph">Graph ⌖</button>` : '';
+
+                // Embed category pill, tie pill, and graph button cleanly into .evidence-header alongside .evidence-tag
                 let cardHtml = html;
                 if (cardHtml.includes('<span class="evidence-tag"')) {
                     cardHtml = cardHtml.replace(
                         /<span class="evidence-tag"([^>]*)>(.*?)<\/span>/s,
-                        `<div class="evidence-tags-group">${categoryPillHtml}${tiePillHtml}<span class="evidence-tag"$1>$2</span></div>`
+                        `<div class="evidence-tags-group">${categoryPillHtml}${tiePillHtml}${graphBtnHtml}${provBtnHtml}<span class="evidence-tag"$1>$2</span></div>`
                     );
                 } else if (cardHtml.includes('<div class="evidence-header">')) {
                     cardHtml = cardHtml.replace(
                         '<div class="evidence-header">',
-                        `<div class="evidence-header"><div class="evidence-tags-group">${categoryPillHtml}${tiePillHtml}</div>`
+                        `<div class="evidence-header"><div class="evidence-tags-group">${categoryPillHtml}${tiePillHtml}${graphBtnHtml}${provBtnHtml}</div>`
                     );
                 }
 
@@ -3647,24 +4710,27 @@ function renderEvidenceTabs(data) {
                     let avatarUrlMatch = piv.pivot_value.match(/(https?:\/\/[^\s]+)/) || (piv.context_note && piv.context_note.match(/(https?:\/\/[^\s]+)/));
                     let avatarUrl = avatarUrlMatch ? avatarUrlMatch[1].replace(/\]$/, '') : "";
                     if (avatarUrl && avatarUrl.includes("profile-framedphoto")) return;
-                    let cleanCtx = piv.context_note ? piv.context_note.replace(/\[URL:\s*https?:\/\/[^\]]+\]/, '').replace(/\[STATUS:\s*VERIFIED\]\s*/g, '').trim() : '';
-                    let platformName = avatarUrl.includes("linkedin") ? "LinkedIn" : (avatarUrl.includes("github") ? "GitHub" : (avatarUrl.includes("gravatar") ? "Gravatar" : "Public Platform"));
+                    let cleanCtx = piv.context_note ? piv.context_note.replace(/\[URL:\s*https?:\/\/[^\]]+\]/, '').replace(/\[STATUS:\s*VERIFIED\]\s*/g, '').replace(/\[STATUS:\s*SECONDARY AVATAR\]\s*/g, '').trim() : '';
+                    let isPrimaryFace = Boolean(piv.context_note && piv.context_note.includes("[TIED: PRIMARY FACE]"));
+                    let platformName = avatarUrl.includes("linkedin") ? "LinkedIn" : (avatarUrl.includes("github") ? "GitHub" : (avatarUrl.includes("gravatar") ? "Gravatar" : (avatarUrl.includes("pinimg") ? "Pinterest" : "Public Platform")));
+                    let tagText = isPrimaryFace ? "PRIMARY FACE PHOTO (AI REASONED)" : "SECONDARY AVATAR";
+                    let tagStyle = isPrimaryFace ? "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);" : "background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3);";
                     addPivotCard(`
-                        <div class="evidence-card" style="border-left: 3px solid #8b5cf6;">
+                        <div class="evidence-card" style="border-left: 3px solid ${isPrimaryFace ? '#10b981' : '#8b5cf6'};">
                             <div class="evidence-header">
                                 <span class="evidence-title flex items-center gap-2">
-                                    ${getUiIcon('user', 'w-4 h-4 text-purple-400')}
+                                    ${getUiIcon('user', isPrimaryFace ? 'w-4 h-4 text-emerald-400' : 'w-4 h-4 text-purple-400')}
                                     <span class="text-zinc-400 font-mono text-xs uppercase tracking-wider">Avatar Identity:</span>
                                     <span class="text-zinc-100 font-semibold">${escapeHtml(platformName)} Visual Asset</span>
                                 </span>
-                                <span class="evidence-tag" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3);">
-                                    AVATAR CORRELATION (${Math.round((piv.confidence_score || 0.92) * 100)}%)
+                                <span class="evidence-tag" style="${tagStyle}">
+                                    ${tagText} (${Math.round((piv.confidence_score || 0.92) * 100)}%)
                                 </span>
                             </div>
                             <div class="evidence-body">
                                 <div style="display: flex; align-items: center; gap: 0.9rem; margin-top: 0.25rem;">
                                     ${avatarUrl ? `
-                                        <div style="flex-shrink: 0; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(139, 92, 246, 0.4); background: #0f172a;">
+                                        <div style="flex-shrink: 0; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; border: 1px solid ${isPrimaryFace ? 'rgba(16, 185, 129, 0.5)' : 'rgba(139, 92, 246, 0.4)'}; background: #0f172a;">
                                             <img src="${escapeHtml(avatarUrl)}" alt="Avatar Footprint" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'">
                                         </div>
                                     ` : ''}
@@ -3675,7 +4741,7 @@ function renderEvidenceTabs(data) {
                                         ${avatarUrl ? `
                                             <div style="margin-top: 0.35rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                                                 <a href="${escapeHtml(avatarUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #a78bfa; border-color: rgba(139, 92, 246, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 7px;">Open Image &rarr;</a>
-                                                <a href="https://lens.google.com/uploadbyurl?url=${encodeURIComponent(avatarUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 7px;">🔍 Google Lens Face Search &rarr;</a>
+                                                <a href="https://lens.google.com/uploadbyurl?url=${encodeURIComponent(avatarUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 7px;">Google Lens Face Search &rarr;</a>
                                                 <a href="https://yandex.com/images/search?rpt=imageview&url=${encodeURIComponent(avatarUrl)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #fb923c; border-color: rgba(251, 146, 60, 0.4); text-decoration: none; font-size: 0.72rem; padding: 2px 7px;">Yandex Visual &rarr;</a>
                                                 <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(avatarUrl)}', 'Avatar URL')">Copy URL</button>
                                             </div>
@@ -3831,7 +4897,7 @@ function renderEvidenceTabs(data) {
                         </span>
                     </div>
                     <p style="font-size: 0.8rem; color: #d1d5db; margin: 8px 0 0 0; line-height: 1.45;">
-                        Candidate handles investigated for the target are cataloged below. Accounts are grouped by whether the <strong>target email is confirmed registered on that platform</strong> (high-value leads) or whether the platform itself is <strong>unconfirmed</strong> (speculative alias matches).
+                        Candidate identities investigated for the target are strictly segregated below. Because multiple individuals often share the same name, profiles lacking cryptographic or email binding are held in quarantine (<strong>Confirmed Leads</strong>, <strong>Namesake Collisions</strong>, <strong>Speculative Probes</strong>, and <strong>Household/Co-Device Affiliates</strong>) to prevent false-positive target contamination.
                     </p>
                 </div>
             `;
@@ -3910,28 +4976,69 @@ function renderEvidenceTabs(data) {
                 unconfirmedServiceCandidates.forEach(piv => {
                     let linkMatch = piv.context_note ? piv.context_note.match(/\[URL:\s*(https?:\/\/[^\]]+)\]/) : null;
                     let url = linkMatch ? linkMatch[1] : null;
-                    let cleanContext = piv.context_note ? piv.context_note.replace(/\[URL:\s*https?:\/\/[^\]]+\]/, '').replace(/\[STATUS:\s*SUSPECTED\]\s*/, '').replace(/\[PLATFORM:\s*[^\]]+\]\s*/, '').trim() : "";
+                    let cleanContext = piv.context_note ? piv.context_note.replace(/\[URL:\s*https?:\/\/[^\]]+\]/, '').replace(/\[STATUS:\s*SUSPECTED\]\s*/, '').replace(/\[STATUS:\s*NAMESAKE_COLLISION\]\s*/, '').replace(/\[STATUS:\s*CANDIDATE_LEAD\]\s*/, '').replace(/\[PLATFORM:\s*[^\]]+\]\s*/, '').trim() : "";
                     let confPct = Math.round((piv.confidence_score || 0.6) * 100);
 
+                    const isCoDevice = (piv.persona_badge && piv.persona_badge.includes("SHARED DEVICE")) ||
+                        (piv.cluster_id && piv.cluster_id.startsWith("device_")) ||
+                        (piv.context_note && (piv.context_note.includes("CO_DEVICE") || piv.context_note.includes("Co-Device")));
+                    const isCollision = piv.is_namesake_collision || (piv.context_note && piv.context_note.includes("[STATUS: NAMESAKE_COLLISION]"));
+
+                    let borderCol, titleCol, tagBg, tagText, tagLabel, gapText, iconName, iconClass;
+                    if (isCoDevice) {
+                        borderCol = "#6366f1";
+                        titleCol = "#818cf8";
+                        tagBg = "rgba(99, 102, 241, 0.2)";
+                        tagText = "#a5b4fc";
+                        tagLabel = "SHARED DEVICE / HOUSEHOLD AFFILIATE";
+                        gapText = "Endpoint Telemetry: Discovered on the same compromised machine or infostealer session. Segregated from primary target identity.";
+                        iconName = "globe";
+                        iconClass = "w-3.5 h-3.5 text-indigo-400";
+                    } else if (isCollision) {
+                        borderCol = "#ef4444";
+                        titleCol = "#f87171";
+                        tagBg = "rgba(239, 68, 68, 0.2)";
+                        tagText = "#f87171";
+                        tagLabel = "NAMESAKE COLLISION (DIFFERENT PERSON)";
+                        if (cleanContext.includes("Location Divergence") || cleanContext.includes("Geographic")) {
+                            gapText = "Disambiguation Exclusion: Account location contradicts target geography. Quarantined because multiple people share this name.";
+                        } else if (cleanContext.includes("Surname")) {
+                            gapText = "Disambiguation Exclusion: Bare surname match lacking email binding. Quarantined to prevent namesake false positives.";
+                        } else {
+                            gapText = "Disambiguation Exclusion: Given name or demographic conflict detected. Quarantined to prevent false-positive namesake attribution.";
+                        }
+                        iconName = "alert";
+                        iconClass = "w-3.5 h-3.5 text-red-400";
+                    } else {
+                        borderCol = "#f59e0b";
+                        titleCol = "#fbbf24";
+                        tagBg = "rgba(245, 158, 11, 0.2)";
+                        tagText = "#fbbf24";
+                        tagLabel = `SPECULATIVE (${confPct}% CONF)`;
+                        gapText = "Telemetry Gap: Lacks confirmed email binding on this service. Quarantined for manual investigator inspection.";
+                        iconName = "search";
+                        iconClass = "w-3.5 h-3.5 text-amber-400";
+                    }
+
                     suspectedContainer.innerHTML += `
-                        <div class="evidence-card" style="border-left: 3px solid #f59e0b; margin-bottom: 0.75rem;">
+                        <div class="evidence-card" style="border-left: 3px solid ${borderCol}; margin-bottom: 0.75rem;">
                             <div class="evidence-header">
-                                <span class="evidence-title flex items-center gap-1.5" style="color: #fbbf24;">${getUiIcon("search", "w-3.5 h-3.5 text-amber-400")} ${escapeHtml(piv.pivot_value)}</span>
-                                <span class="evidence-tag" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b;">
-                                    SPECULATIVE (${confPct}% CONF)
+                                <span class="evidence-title flex items-center gap-1.5" style="color: ${titleCol};">${getUiIcon(iconName, iconClass)} ${escapeHtml(piv.pivot_value)}</span>
+                                <span class="evidence-tag" style="background: ${tagBg}; color: ${tagText}; border: 1px solid ${borderCol};">
+                                    ${escapeHtml(tagLabel)}
                                 </span>
                             </div>
                             <div class="evidence-body">
                                 <div style="display: flex; flex-direction: column; gap: 0.4rem;">
                                     <div><strong>Triage Reason:</strong> <span style="color: var(--t-secondary);">${escapeHtml(cleanContext || 'Candidate account identified via username stem matching.')}</span></div>
-                                    <div style="font-size: 0.75rem; color: #94a3b8; display: flex; align-items: center; gap: 0.4rem;">
-                                        ${getUiIcon("alert", "w-3 h-3 text-amber-400")}
-                                        <span>Telemetry Gap: Lacks confirmed email binding on this service. Risk of unrelated vanity collision.</span>
+                                    <div style="font-size: 0.75rem; color: ${isCollision ? '#f87171' : (isCoDevice ? '#a5b4fc' : '#94a3b8')}; display: flex; align-items: center; gap: 0.4rem;">
+                                        ${getUiIcon(iconName, `w-3 h-3 ${isCollision ? 'text-red-400' : (isCoDevice ? 'text-indigo-400' : 'text-amber-400')}`)}
+                                        <span>${escapeHtml(gapText)}</span>
                                     </div>
                                 </div>
                                 ${url ? `
                                     <div style="margin-top: 0.6rem;">
-                                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); text-decoration: none; font-size: 0.74rem;">
+                                        <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="btn-mini-unlock" style="color: ${titleCol}; border-color: ${borderCol}; text-decoration: none; font-size: 0.74rem;">
                                             Manual Inspection: Open Candidate Profile &rarr;
                                         </a>
                                     </div>
@@ -4378,11 +5485,329 @@ function renderEvidenceTabs(data) {
     if (typeof renderImageCorrelationTab === "function") {
         renderImageCorrelationTab(data);
     }
+    const imgBadge = document.getElementById("count-images");
+    if (imgBadge) {
+        imgBadge.innerText = (data && data.images) ? data.images.length : 0;
+    }
 
     // 15. Reverse Phone & Telecom Intelligence
     if (typeof renderTelecomTab === "function") {
         renderTelecomTab(data);
     }
+
+    // 16. Forensic Execution Trace & Provenance Console
+    if (typeof renderProvenanceConsole === "function") {
+        renderProvenanceConsole(data);
+    }
+
+    // 17. Synchronize Dynamic Evidence Count Badges
+    if (typeof updateTabCountBadges === "function") {
+        updateTabCountBadges(data);
+    }
+}
+
+/**
+ * Switch to and inspect the Forensic Execution Trace & Provenance Console
+ */
+function openProvenanceConsole(focusStepId) {
+    const btn = document.querySelector('.tab-btn[data-tab="tab-provenance-console"]');
+    if (btn) btn.click();
+    if (focusStepId) {
+        setTimeout(() => {
+            const stepEl = document.getElementById(focusStepId);
+            if (stepEl) {
+                stepEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                stepEl.classList.add("highlight-pulse");
+                setTimeout(() => stepEl.classList.remove("highlight-pulse"), 2500);
+            }
+        }, 150);
+    }
+}
+
+/**
+ * Filter the raw SOC terminal stream by keyword or tag
+ */
+let currentProvFilter = "ALL";
+function filterProvenanceTerminal(filterType) {
+    currentProvFilter = filterType;
+    document.querySelectorAll(".btn-prov-filter").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-prov-filter") === filterType);
+    });
+    applyProvenanceTerminalSearch();
+}
+
+function applyProvenanceTerminalSearch() {
+    const searchVal = (document.getElementById("prov-term-search")?.value || "").toLowerCase();
+    const lines = document.querySelectorAll(".prov-term-line");
+    lines.forEach(line => {
+        const text = line.innerText.toLowerCase();
+        const tag = line.getAttribute("data-tag") || "";
+        let matchesFilter = true;
+        if (currentProvFilter === "DISCOVERIES") matchesFilter = tag.includes("DISCOVERY") || text.includes("corroborat") || text.includes("verified") || text.includes("discovered");
+        else if (currentProvFilter === "AI") matchesFilter = tag.includes("AI") || text.includes("cardinal") || text.includes("reasoning") || text.includes("synthesis");
+        else if (currentProvFilter === "BROWSER") matchesFilter = text.includes("linkedin") || text.includes("facebook") || text.includes("browser") || text.includes("playwright");
+        else if (currentProvFilter === "IMAGERY") matchesFilter = text.includes("avatar") || text.includes("image") || text.includes("face") || text.includes("portrait");
+
+        const matchesSearch = !searchVal || text.includes(searchVal);
+        line.style.display = (matchesFilter && matchesSearch) ? "flex" : "none";
+    });
+}
+
+function switchProvenanceMode(mode) {
+    document.querySelectorAll(".btn-prov-mode").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-mode") === mode);
+    });
+    const journeyEl = document.getElementById("prov-view-journey");
+    const termEl = document.getElementById("prov-view-terminal");
+    const ledgerEl = document.getElementById("prov-view-ledger");
+    if (journeyEl) journeyEl.style.display = mode === "journey" ? "flex" : "none";
+    if (termEl) termEl.style.display = mode === "terminal" ? "block" : "none";
+    if (ledgerEl) ledgerEl.style.display = mode === "ledger" ? "block" : "none";
+}
+
+function copyProvenanceLog() {
+    if (!currentInvestigationData || !currentInvestigationData.execution_trace) {
+        showToast("No active execution trace data to copy.", "error");
+        return;
+    }
+    const trace = currentInvestigationData.execution_trace;
+    let logText = `======================================================================\n`;
+    logText += `BREACHSPILLOVER SOC INVESTIGATION EXECUTION LOG\n`;
+    logText += `TARGET: ${trace.target}\n`;
+    logText += `DURATION: ${trace.total_duration_seconds}s | PHASES: ${trace.total_steps} | DISCOVERIES: ${trace.total_discoveries}\n`;
+    logText += `======================================================================\n\n`;
+
+    (trace.log_lines || []).forEach(l => {
+        logText += `[${l.time_str}] [${l.level}] [${l.tag}] ${l.message}\n`;
+    });
+    copyToClipboard(logText, "Execution Console Log");
+}
+
+function exportProvenanceJSON() {
+    if (!currentInvestigationData || !currentInvestigationData.execution_trace) {
+        showToast("No active trace available for export.", "error");
+        return;
+    }
+    const trace = currentInvestigationData.execution_trace;
+    const blob = new Blob([JSON.stringify(trace, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `investigation_trace_${trace.target.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Investigation trace JSON exported successfully.", "success");
+}
+
+/**
+ * Render Forensic Execution Trace & Provenance Console Tab
+ */
+function renderProvenanceConsole(data) {
+    const container = document.getElementById("tab-provenance-console-content");
+    if (!container) return;
+
+    const trace = (data && data.execution_trace) ? data.execution_trace : null;
+    const emp = (data && data.employee) ? data.employee : {};
+    const email = emp.corporate_email || currentEmail || "";
+
+    if (!trace || !trace.steps || trace.steps.length === 0) {
+        container.innerHTML = `
+            <div class="evidence-card" style="border-left: 3px solid #64748b; padding: 24px; text-align: center;">
+                <div class="mono text-xs text-zinc-400 mb-2">No active execution trace loaded for ${escapeHtml(email || 'target')}</div>
+                <div class="text-xs text-zinc-500 mb-3">Trigger a live scan to view real-time stage transitions, search queries, and AI visual arbitration reasoning.</div>
+            </div>
+        `;
+        return;
+    }
+
+    const steps = trace.steps || [];
+    const logLines = trace.log_lines || [];
+    const discoveries = trace.discoveries_ledger || [];
+
+    let html = `
+        <div class="provenance-console-wrapper">
+            <!-- Header Card -->
+            <div class="provenance-header-card">
+                <div class="provenance-header-top">
+                    <div class="provenance-main-title">
+                        <span class="recon-pulse-indicator"></span>
+                        SOC INVESTIGATION EXECUTION LOG &amp; PROVENANCE CONSOLE
+                    </div>
+                    <div class="provenance-stats-row mono">
+                        <span class="provenance-stat-chip">TARGET: <strong style="color: #38bdf8;">${escapeHtml(trace.target)}</strong></span>
+                        <span class="provenance-stat-chip">PIPELINE: <strong style="color: #34d399;">${trace.total_duration_seconds}s</strong></span>
+                        <span class="provenance-stat-chip">PHASES: <strong>${trace.total_steps}</strong></span>
+                        <span class="provenance-stat-chip">DISCOVERIES: <strong style="color: #c084fc;">${trace.total_discoveries}</strong></span>
+                    </div>
+                </div>
+                <div class="provenance-desc">
+                    Comprehensive, transparent audit trail showing exactly how the system navigated from initial target seed (${escapeHtml(trace.target)}) through breach correlation, multi-stream OSINT probes, AI cognitive synthesis, headless browser validation, and multimodal face arbitration to yield verified pivots and photographs.
+                </div>
+                <div class="provenance-controls-bar">
+                    <div class="provenance-mode-pills">
+                        <button type="button" class="btn-prov-mode active" data-mode="journey" onclick="switchProvenanceMode('journey')">[1. PIPELINE JOURNEY]</button>
+                        <button type="button" class="btn-prov-mode" data-mode="terminal" onclick="switchProvenanceMode('terminal')">[2. SOC TERMINAL LOGS (${logLines.length})]</button>
+                        <button type="button" class="btn-prov-mode" data-mode="ledger" onclick="switchProvenanceMode('ledger')">[3. DISCOVERIES MAP (${discoveries.length})]</button>
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                        <button type="button" class="btn-tool" onclick="copyProvenanceLog()" style="font-size: 0.72rem; padding: 3px 8px;">
+                            [COPY LOG]
+                        </button>
+                        <button type="button" class="btn-tool" onclick="exportProvenanceJSON()" style="font-size: 0.72rem; padding: 3px 8px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
+                            [EXPORT JSON]
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- View 1: Pipeline Journey (Visual Stepper) -->
+            <div id="prov-view-journey" class="provenance-journey-pipeline" style="display: flex;">
+    `;
+
+    steps.forEach((step, idx) => {
+        const markerNum = idx + 1;
+        const detailsList = step.details || [];
+        const items = step.discovered_items || [];
+        const stepId = step.step_id || `step_${markerNum}`;
+
+        html += `
+            <div id="${stepId}" class="provenance-step-card">
+                <div class="provenance-step-marker">${markerNum}</div>
+                <div class="provenance-step-header">
+                    <div class="provenance-step-title">
+                        <span>${escapeHtml(step.title)}</span>
+                    </div>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <span class="mono text-[10px] uppercase font-bold" style="color: #64748b;">${escapeHtml(step.phase_name)}</span>
+                        <span class="provenance-step-time mono">+${step.elapsed_seconds}s</span>
+                    </div>
+                </div>
+                <div class="provenance-step-summary">
+                    ${escapeHtml(step.summary)}
+                </div>
+        `;
+
+        if (items.length > 0) {
+            html += `<div class="provenance-discoveries-row">`;
+            items.forEach(it => {
+                const val = it.value || it.type;
+                const status = it.status || "CONFIRMED";
+                const isPriFace = status.includes("PRIMARY FACE");
+                const bgStyle = isPriFace ? "background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.5); color: #34d399;" : "";
+                html += `
+                    <span class="provenance-discovery-chip mono" style="${bgStyle}">
+                        <span style="font-weight: bold;">[${escapeHtml(status)}]</span> ${escapeHtml(val)}
+                    </span>
+                `;
+            });
+            html += `</div>`;
+        }
+
+        if (detailsList.length > 0) {
+            html += `
+                <button type="button" class="provenance-toggle-details-btn mono" onclick="const box = document.getElementById('details-${stepId}'); box.style.display = box.style.display === 'none' ? 'block' : 'none'; this.innerText = box.style.display === 'none' ? '+ Show Execution Details (' + ${detailsList.length} + ')' : '- Hide Execution Details';">
+                    + Show Execution Details (${detailsList.length})
+                </button>
+                <div id="details-${stepId}" class="provenance-log-details-box mono" style="display: none;">
+            `;
+            detailsList.forEach(line => {
+                html += `<div class="provenance-log-item"><span style="color: #38bdf8;">&bull;</span> <span>${escapeHtml(line)}</span></div>`;
+            });
+            html += `</div>`;
+        }
+
+        html += `</div>`;
+    });
+
+    html += `
+            </div>
+
+            <!-- View 2: Raw SOC Cyber Console (Terminal Stream) -->
+            <div id="prov-view-terminal" class="provenance-terminal-box" style="display: none;">
+                <div class="provenance-terminal-topbar">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="terminal-dots">
+                            <span class="terminal-dot dot-red"></span>
+                            <span class="terminal-dot dot-yellow"></span>
+                            <span class="terminal-dot dot-green"></span>
+                        </div>
+                        <span class="mono text-xs font-bold text-zinc-300">SOC_RECON_STREAM // ${escapeHtml(trace.target)}</span>
+                    </div>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <input type="text" id="prov-term-search" placeholder="Filter console output..." oninput="applyProvenanceTerminalSearch()" class="terminal-input" style="padding: 2px 8px; font-size: 0.7rem; width: 170px; background: rgba(0,0,0,0.5); border: 1px solid var(--b-subtle); border-radius: 4px; color: var(--t-primary);">
+                        <button type="button" class="btn-prov-filter active btn-prov-mode" data-prov-filter="ALL" onclick="filterProvenanceTerminal('ALL')">[ALL]</button>
+                        <button type="button" class="btn-prov-filter btn-prov-mode" data-prov-filter="DISCOVERIES" onclick="filterProvenanceTerminal('DISCOVERIES')">[HITS]</button>
+                        <button type="button" class="btn-prov-filter btn-prov-mode" data-prov-filter="AI" onclick="filterProvenanceTerminal('AI')">[AI]</button>
+                        <button type="button" class="btn-prov-filter btn-prov-mode" data-prov-filter="BROWSER" onclick="filterProvenanceTerminal('BROWSER')">[BROWSER]</button>
+                        <button type="button" class="btn-prov-filter btn-prov-mode" data-prov-filter="IMAGERY" onclick="filterProvenanceTerminal('IMAGERY')">[AVATARS]</button>
+                    </div>
+                </div>
+                <div class="provenance-terminal-body">
+    `;
+
+    logLines.forEach(l => {
+        let tagClass = "tag-info";
+        if (l.level === "SUCCESS" || l.tag.includes("DISCOVERY")) tagClass = "tag-discovery";
+        else if (l.level === "AI" || l.tag.includes("CARDINAL") || l.tag.includes("SYNTHESIS")) tagClass = "tag-ai";
+        else if (l.level === "WARN") tagClass = "tag-warn";
+        else if (l.tag.includes("PHASE")) tagClass = "tag-phase";
+
+        html += `
+            <div class="prov-term-line" data-tag="${escapeHtml(l.tag)} ${escapeHtml(l.level)}">
+                <span class="prov-term-time">${escapeHtml(l.time_str)}</span>
+                <span class="prov-term-tag ${tagClass}">[${escapeHtml(l.tag)}]</span>
+                <span class="prov-term-msg">${escapeHtml(l.message)}</span>
+            </div>
+        `;
+    });
+
+    html += `
+                </div>
+            </div>
+
+            <!-- View 3: Discoveries Ledger (Origin Map) -->
+            <div id="prov-view-ledger" style="display: none;">
+                <div class="breach-table-container">
+                    <table class="breach-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 140px;">DISCOVERY TYPE</th>
+                                <th>EXTRACTED VALUE</th>
+                                <th style="width: 160px;">ORIGIN PROVENANCE</th>
+                                <th style="width: 140px;">STATUS</th>
+                                <th style="width: 90px; text-align: right;">ACTION</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+    `;
+
+    discoveries.forEach(d => {
+        html += `
+            <tr>
+                <td class="mono font-bold" style="color: #38bdf8; font-size: 0.72rem;">${escapeHtml(d.type || 'ASSET')}</td>
+                <td class="mono font-semibold" style="word-break: break-all;">${escapeHtml(d.value || '')}</td>
+                <td class="mono text-xs text-zinc-400">${escapeHtml(d.origin || d.phase_name || 'OSINT Engine')}</td>
+                <td><span class="badge-pill badge-neutral" style="font-size: 0.65rem;">${escapeHtml(d.status || 'INGESTED')}</span></td>
+                <td style="text-align: right;">
+                    <button type="button" class="btn-tool" onclick="openProvenanceConsole('${d.step_id || 'step_1_seed'}')" style="font-size: 0.68rem; padding: 2px 6px;">
+                        Trace &rarr;
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+
+    html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = html;
 }
 
 function renderDorksTab(data) {
@@ -4531,7 +5956,7 @@ async function resolveCredentialHash(hashVal, btnEl) {
     btnEl.disabled = true;
 
     try {
-        const resp = await fetch(`/api/hash/resolve?hash=${encodeURIComponent(hashVal)}`);
+        const resp = await fetch(`/api/hash/resolve?hash=${encodeURIComponent(hashVal)}&email=${encodeURIComponent(currentEmail || '')}`);
         const data = await resp.json();
         if (data.resolved && data.plaintext) {
             resultSlot.innerHTML = `
@@ -4565,6 +5990,106 @@ async function resolveCredentialHash(hashVal, btnEl) {
         btnEl.disabled = false;
     }
 }
+
+/**
+ * Interactive Self-Audit Password & 2019 Legacy Phrase Auditor
+ */
+function selectSelfAuditPhrase(phrase) {
+    const input = document.getElementById("self-audit-pwd-input");
+    if (input) {
+        input.value = phrase;
+        executePasswordSelfAudit(phrase, false);
+    }
+}
+
+function executePasswordSelfAudit(phraseToAudit, saveToIdentity = false) {
+    const input = document.getElementById("self-audit-pwd-input");
+    const pwd = (phraseToAudit || (input ? input.value : "")).trim();
+    if (!pwd) {
+        showToast("Please enter a password phrase to audit.", "warning");
+        return;
+    }
+
+    const slot = document.getElementById("self-audit-live-result");
+    if (slot) {
+        slot.style.display = "block";
+        slot.innerHTML = `
+            <div style="padding: 10px; background: var(--c-surface); border: 1px solid var(--b-hairline); border-radius: 4px; font-size: 0.78rem; color: var(--t-secondary);">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="mono" style="color: #38bdf8; font-weight: 700;">[FORENSIC AUDIT IN PROGRESS]</span>
+                    <span>Auditing "${escapeHtml(pwd)}" against HIBP k-Anonymity database &amp; computing Shannon entropy...</span>
+                </div>
+            </div>
+        `;
+    }
+
+    fetch("/api/password/audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            password: pwd,
+            email: currentEmail,
+            save_to_identity: Boolean(saveToIdentity)
+        })
+    })
+        .then(r => {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+        })
+        .then(res => {
+            if (!slot) return;
+            const freq = res.global_frequency || 0;
+            const freqBadge = freq > 0
+                ? `<span class="badge-pill mono" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; font-weight: 700; font-size: 0.75rem;">[HIBP K-ANONYMITY: ${freq.toLocaleString()} GLOBAL LEAKS]</span>`
+                : `<span class="badge-pill mono" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; font-weight: 700; font-size: 0.75rem;">[0 LEAKS IN GLOBAL INDEX]</span>`;
+
+            const tierColor = res.tier_color || (res.spillover_risk_score > 60 ? "#ef4444" : "#38bdf8");
+
+            slot.innerHTML = `
+            <div class="evidence-card" style="border-left: 3px solid ${tierColor}; margin-top: 10px; background: var(--c-surface);">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <span class="mono" style="font-weight: 700; font-size: 0.95rem; color: #f87171; background: var(--c-elevated); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--b-hairline);">${escapeHtml(res.password)}</span>
+                        ${freqBadge}
+                        <span class="badge-pill mono" style="font-size: 0.7rem; background: rgba(249, 115, 22, 0.15); color: ${tierColor}; border: 1px solid ${tierColor}; font-weight: 700;">SPILLOVER RISK: ${res.spillover_risk_score}/100 (${escapeHtml(res.spillover_risk_tier)})</span>
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                        <button type="button" class="btn-copy-mini mono" onclick="copyToClipboard('${escapeHtml(res.password)}', 'Audited Password')">Copy Phrase</button>
+                        ${res.saved_to_identity
+                    ? `<span class="badge-pill mono" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981;">[LINKED TO IDENTITY]</span>`
+                    : `<button type="button" class="btn-copy-mini mono" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border-color: rgba(59, 130, 246, 0.35);" onclick="executePasswordSelfAudit('${escapeHtml(res.password)}', true)">Link as Confirmed Password</button>`}
+                    </div>
+                </div>
+
+                <div style="margin-top: 0.65rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; font-size: 0.74rem;">
+                    <div><strong>Shannon Entropy:</strong> <span class="mono" style="color: #38bdf8;">${res.shannon_entropy} bits/char</span></div>
+                    <div><strong>Keyspace Strength:</strong> <span class="mono" style="color: #a78bfa;">${res.keyspace_entropy_bits} bits (${escapeHtml(res.complexity_rating)})</span></div>
+                    <div><strong>Pattern Class:</strong> <span class="mono" style="color: var(--t-primary);">${escapeHtml(res.pattern)}</span></div>
+                    <div><strong>Target Bound:</strong> <span class="mono" style="color: ${res.is_identity_bound ? '#f87171' : '#34d399'};">${res.is_identity_bound ? 'YES (Matches Handle/Name Tokens)' : 'NO'}</span></div>
+                </div>
+
+                <div style="margin-top: 0.6rem; padding: 0.5rem 0.75rem; background: var(--c-elevated); border-radius: 4px; font-size: 0.73rem; color: var(--t-secondary); line-height: 1.45; border-left: 2px solid ${tierColor};">
+                    ${escapeHtml(res.lateral_movement_analysis)}
+                </div>
+            </div>
+        `;
+
+            if (saveToIdentity) {
+                showToast("Linked password to target profile! Refreshing exposure data...", "success");
+                if (typeof searchExposure === "function") {
+                    searchExposure(currentEmail, false);
+                }
+            }
+        })
+        .catch(err => {
+            if (slot) {
+                slot.innerHTML = `<div style="color: #f87171; font-size: 0.78rem; padding: 8px;">Error auditing password: ${escapeHtml(err.message)}</div>`;
+            }
+        });
+}
+
+window.selectSelfAuditPhrase = selectSelfAuditPhrase;
+window.executePasswordSelfAudit = executePasswordSelfAudit;
 
 
 /* ==========================================================================
@@ -4964,34 +6489,218 @@ window.triggerPastesScan = triggerPastesScan;
 
 
 /**
- * Universal Clipboard Copy Helper
+ * Universal Clipboard Copy Helper with Tactile UI & SFX Feedback
  */
-function copyToClipboard(text, label = "Data") {
+function copyToClipboard(text, label = "Data", triggerBtn = null) {
     if (!text) return;
+
+    // Auto-detect triggering button for micro-feedback animation
+    const btn = triggerBtn || (window.event && window.event.target ? window.event.target.closest("button, .btn-copy-mini, .btn-action-tool") : null);
+
+    const applyBtnFeedback = () => {
+        if (btn) {
+            const originalContent = btn.innerHTML;
+            btn.classList.add("copied");
+            btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">COPIED! ✓</span>`;
+            setTimeout(() => {
+                btn.innerHTML = originalContent;
+                btn.classList.remove("copied");
+            }, 1600);
+        }
+    };
+
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(() => {
             showToast(`Copied ${label} to clipboard`, "success");
+            if (window.sfx) window.sfx.playSelect();
+            applyBtnFeedback();
         }).catch(() => {
-            fallbackCopy(text, label);
+            fallbackCopy(text, label, applyBtnFeedback);
         });
     } else {
-        fallbackCopy(text, label);
+        fallbackCopy(text, label, applyBtnFeedback);
     }
 }
-function fallbackCopy(text, label) {
+function fallbackCopy(text, label, callback) {
     const el = document.createElement("textarea");
     el.value = text;
+    el.style.position = "fixed";
+    el.style.opacity = "0";
     document.body.appendChild(el);
     el.select();
     try {
         document.execCommand("copy");
         showToast(`Copied ${label} to clipboard`, "success");
+        if (window.sfx) window.sfx.playSelect();
+        if (typeof callback === "function") callback();
     } catch (err) {
         showToast("Could not copy to clipboard", "warning");
     }
     document.body.removeChild(el);
 }
 window.copyToClipboard = copyToClipboard;
+
+/**
+ * One-Click Copy All Credentials from Vault
+ */
+function copyAllVaultCreds() {
+    const data = currentInvestigationData || window.cachedScanData;
+    if (!data) {
+        showToast("No active investigation credentials to copy.", "warning");
+        return;
+    }
+    const creds = data.credentials || [];
+    const pwDisclosures = data.password_disclosures || [];
+    if (creds.length === 0 && pwDisclosures.length === 0) {
+        showToast("No credentials available in vault to copy.", "info");
+        return;
+    }
+    const lines = [];
+    lines.push("======================================================");
+    lines.push("BREACHSPILLOVER FORENSIC CREDENTIAL VAULT EXPORT");
+    lines.push(`TARGET: ${currentEmail || (data.employee && data.employee.corporate_email) || 'Unknown'}`);
+    lines.push(`TOTAL SECRETS: ${creds.length + pwDisclosures.length}`);
+    lines.push(`TIMESTAMP: ${new Date().toISOString()}`);
+    lines.push("======================================================\n");
+
+    if (creds.length > 0) {
+        lines.push("[EXFILTRATED CREDENTIALS]");
+        creds.forEach((c, i) => {
+            const u = c.username_or_email || c.username || c.login || currentEmail || "N/A";
+            const p = c.plaintext_password || c.password || c.password_hash || c.hash || "N/A";
+            const leak = c.leak_name || c.service || c.domain_compromised || "Exfiltrated Credential";
+            lines.push(`${i + 1}. Source: ${leak} | User: ${u} | Secret: ${p}`);
+        });
+        lines.push("");
+    }
+
+    if (pwDisclosures.length > 0) {
+        lines.push("[DISCLOSED PASSWORDS & COMBO HITS]");
+        pwDisclosures.forEach((pw, i) => {
+            const val = typeof pw === "object" ? (pw.password || pw.plaintext || JSON.stringify(pw)) : pw;
+            lines.push(`${i + 1}. Disclosed Secret: ${val}`);
+        });
+        lines.push("");
+    }
+
+    const fullExport = lines.join("\n");
+    const btn = document.getElementById("btn-copy-all-creds");
+    copyToClipboard(fullExport, "All Vault Credentials", btn);
+}
+window.copyAllVaultCreds = copyAllVaultCreds;
+
+/**
+ * Update real-time evidence count badges on Stage 4 workspace tabs
+ */
+function updateTabCountBadges(data) {
+    if (!data) return;
+    const pivots = data.pivots || [];
+    const leaks = data.leaks || [];
+    const creds = data.credentials || [];
+    const pwDisclosures = data.password_disclosures || [];
+    const physical = data.physical_footprints || [];
+    const relatives = data.relatives || [];
+    const pastes = data.pastes || [];
+    const images = data.images || [];
+
+    const activePersona = window.activePersonaFilter || "persona_target";
+    let effectivePivots = pivots;
+    if (activePersona !== "all") {
+        effectivePivots = pivots.filter(p => (p.persona_id || p.cluster_id || "persona_target") === activePersona);
+    }
+    const rawSuspected = effectivePivots.filter(p => typeof isCandidateLedgerPivot === "function" ? isCandidateLedgerPivot(p) : false);
+    const verifiedPivots = effectivePivots.filter(p => !rawSuspected.includes(p) && (typeof isVisualMediaPivot === "function" ? !isVisualMediaPivot(p) : true));
+
+    const elPivots = document.getElementById("count-pivots");
+    if (elPivots) elPivots.innerText = verifiedPivots.length;
+
+    const elSuspected = document.getElementById("count-suspected");
+    if (elSuspected) elSuspected.innerText = rawSuspected.length;
+
+    const elImages = document.getElementById("count-images");
+    if (elImages) elImages.innerText = images.length;
+
+    const elLeaks = document.getElementById("count-leaks");
+    if (elLeaks) elLeaks.innerText = leaks.length;
+
+    const elCreds = document.getElementById("count-creds");
+    if (elCreds) elCreds.innerText = creds.length + pwDisclosures.length;
+
+    const elPhysical = document.getElementById("count-physical");
+    if (elPhysical) elPhysical.innerText = physical.length + relatives.length;
+
+    const telecomCount = pivots.filter(p => {
+        const pt = (p.pivot_type || "").toUpperCase();
+        return pt.includes("PHONE") || pt.includes("TELECOM");
+    }).length + ((data.reverse_phone || data.phone_intel) ? 1 : 0);
+
+    const elTelecom = document.getElementById("count-telecom");
+    if (elTelecom) elTelecom.innerText = telecomCount;
+
+    const elPastes = document.getElementById("count-pastes");
+    if (elPastes) elPastes.innerText = pastes.length;
+}
+window.updateTabCountBadges = updateTabCountBadges;
+
+/**
+ * Instant Real-Time Filter for Breach Disclosures Table
+ */
+function filterLeaksTable(query) {
+    const q = (query || "").toLowerCase().trim();
+    const container = document.getElementById("tab-leaks-content");
+    if (!container) return;
+    const rows = container.querySelectorAll(".breach-row");
+    rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        const rowId = row.id;
+        const drawer = rowId ? document.getElementById(`${rowId}-drawer`) : null;
+        if (!q || text.includes(q)) {
+            row.style.display = "";
+        } else {
+            row.style.display = "none";
+            if (drawer) drawer.style.display = "none";
+        }
+    });
+}
+window.filterLeaksTable = filterLeaksTable;
+
+/**
+ * Instant Real-Time Filter for Credential Vault
+ */
+function filterCredsTable(query) {
+    const q = (query || "").toLowerCase().trim();
+    const container = document.getElementById("tab-creds-content");
+    if (!container) return;
+    const cards = container.querySelectorAll(".evidence-card");
+    cards.forEach(card => {
+        const text = card.innerText.toLowerCase();
+        if (!q || text.includes(q)) {
+            card.style.display = "";
+        } else {
+            card.style.display = "none";
+        }
+    });
+}
+window.filterCredsTable = filterCredsTable;
+
+/**
+ * Instant Real-Time Filter for OSINT Pivots
+ */
+function filterPivotsRealtime(query) {
+    const q = (query || "").toLowerCase().trim();
+    const container = document.getElementById("tab-pivots-content");
+    if (!container) return;
+    const items = container.querySelectorAll(".evidence-card, .finding-item-row, .pivot-row");
+    items.forEach(item => {
+        const text = item.innerText.toLowerCase();
+        if (!q || text.includes(q)) {
+            item.style.display = "";
+        } else {
+            item.style.display = "none";
+        }
+    });
+}
+window.filterPivotsRealtime = filterPivotsRealtime;
 
 /**
  * Full Telemetry Dictionary Ledger
@@ -5346,7 +7055,67 @@ function filterGraphCategory(category) {
 window.filterGraphCategory = filterGraphCategory;
 
 /**
- * De-clutter & Organize Graph into Concentric Orbits
+ * ==========================================================================
+ * ADVANCED SPILLOVER GRAPH INTELLIGENCE SUITE
+ * 1. Concentric Threat Radar Orbits with HTML5 Canvas Grid Drawing
+ * 2. Risk Severity Filter (Critical / High+ / Med+ / All)
+ * 3. Interactive Credential Blast Radius & Lateral Takeover Simulator
+ * 4. Chronological Attack Surface Time-Travel Scrubber
+ * ==========================================================================
+ */
+
+let isRadarOrbitMode = false;
+let currentSeverityFilter = "all";
+let timelinePlaybackTimer = null;
+
+/**
+ * Draw Tactical Concentric Radar Grid & Range Rings on HTML5 Canvas
+ */
+function drawRadarGridBackground(ctx) {
+    if (!isRadarOrbitMode || !networkInstance) return;
+
+    ctx.save();
+    const isLightMode = isCurrentThemeLight();
+    const ringColor = isLightMode ? "rgba(14, 165, 233, 0.18)" : "rgba(56, 189, 248, 0.14)";
+    const textColor = isLightMode ? "rgba(2, 132, 199, 0.7)" : "rgba(56, 189, 248, 0.55)";
+    const crossColor = isLightMode ? "rgba(148, 163, 184, 0.2)" : "rgba(255, 255, 255, 0.05)";
+
+    // Crosshairs through Origin (0, 0)
+    ctx.strokeStyle = crossColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-1600, 0); ctx.lineTo(1600, 0);
+    ctx.moveTo(0, -1600); ctx.lineTo(0, 1600);
+    ctx.stroke();
+
+    // Concentric Range Rings
+    const rings = [
+        { r: 340, label: "ORBIT 1 // PROVENANCE HUBS" },
+        { r: 660, label: "ORBIT 2 // INCIDENTS & DISCLOSURES" },
+        { r: 960, label: "ORBIT 3 // STOLEN CREDENTIALS & SECRETS" },
+        { r: 1280, label: "ORBIT 4 // EXTERNAL PIVOTS & FOOTPRINTS" }
+    ];
+
+    rings.forEach(ring => {
+        ctx.strokeStyle = ringColor;
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.arc(0, 0, ring.r, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        ctx.setLineDash([]);
+        ctx.fillStyle = textColor;
+        ctx.font = "bold 9px 'JetBrains Mono', monospace";
+        ctx.fillText(ring.label, 12, -ring.r + 14);
+    });
+
+    ctx.restore();
+}
+window.drawRadarGridBackground = drawRadarGridBackground;
+
+/**
+ * Organize Graph into Concentric Threat Radar Geometry
  */
 function tidyGraphConcentric() {
     if (!networkInstance || !currentNodesDataSet || !rawGraphNodes.length) {
@@ -5363,12 +7132,10 @@ function tidyGraphConcentric() {
     const hubNodes = rawGraphNodes.filter(n => n.id.startsWith("hub_") || (n.data && n.data.type === "PROVENANCE_HUB"));
     const hubIds = new Set(hubNodes.map(h => h.id));
 
-    // Map children connected to each hub or center
     const hubChildren = {};
     hubNodes.forEach(h => { hubChildren[h.id] = []; });
     const directChildren = [];
 
-    // Map edges
     rawGraphEdges.forEach(e => {
         if (e.from === centerId && hubIds.has(e.to)) {
             // center to hub
@@ -5382,12 +7149,11 @@ function tidyGraphConcentric() {
 
     const updates = [];
 
-    // Place Center Node at (0, 0)
+    // Center Node at (0, 0)
     if (centerId) {
         updates.push({ id: centerId, x: 0, y: 0, fixed: true });
     }
 
-    // Place Hubs in Ring 1 (Radius 340)
     const numHubs = hubNodes.length || 1;
     const rHub = 340;
     const rChild = 660;
@@ -5399,7 +7165,6 @@ function tidyGraphConcentric() {
         const hy = Math.round(rHub * Math.sin(angle));
         updates.push({ id: hub.id, x: hx, y: hy, fixed: true });
 
-        // Place children in fan sector
         const children = hubChildren[hub.id] || [];
         const numChildren = children.length;
         if (numChildren > 0) {
@@ -5411,7 +7176,6 @@ function tidyGraphConcentric() {
                 const cy = Math.round(rChild * Math.sin(childAngle));
                 updates.push({ id: cId, x: cx, y: cy, fixed: true });
 
-                // Check leaf nodes (e.g. credentials attached to leaks)
                 const grandchildren = rawGraphEdges.filter(e => e.from === cId).map(e => e.to);
                 const numGrand = grandchildren.length;
                 if (numGrand > 0) {
@@ -5428,7 +7192,6 @@ function tidyGraphConcentric() {
         }
     });
 
-    // Handle direct children if any
     directChildren.forEach((dId, dIdx) => {
         const dAngle = (2 * Math.PI * dIdx) / (directChildren.length || 1);
         updates.push({
@@ -5439,19 +7202,419 @@ function tidyGraphConcentric() {
         });
     });
 
-    // Apply updates
     currentNodesDataSet.update(updates);
 
-    // Disable physics to preserve orbit geometry
     isPhysicsEnabled = false;
     const btnPhys = document.getElementById("btn-graph-physics");
     if (btnPhys) btnPhys.innerHTML = "[PHYSICS: OFF]";
     networkInstance.setOptions({ physics: { enabled: false } });
 
     networkInstance.fit({ animation: { duration: 600, easingFunction: 'easeInOutQuad' } });
-    if (typeof showToast === "function") showToast("Graph organized in clean concentric orbits.", "success");
+    networkInstance.redraw();
 }
 window.tidyGraphConcentric = tidyGraphConcentric;
+
+/**
+ * Toggle Radar Threat Orbits View Mode with Range Rings
+ */
+function toggleRadarOrbits() {
+    isRadarOrbitMode = !isRadarOrbitMode;
+    const btn = document.getElementById("btn-graph-tidy");
+    if (isRadarOrbitMode) {
+        tidyGraphConcentric();
+        if (btn) {
+            btn.innerHTML = `<span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#38bdf8; margin-right:4px; box-shadow:0 0 6px #38bdf8;"></span>[RADAR: ON]`;
+            btn.className = "btn-tool text-sky-400 border-sky-500/60 bg-sky-500/10";
+        }
+        showToast("Concentric Radar Orbits activated with Range Rings.", "success");
+    } else {
+        if (currentNodesDataSet) {
+            const updates = currentNodesDataSet.get().map(n => ({ id: n.id, fixed: false }));
+            currentNodesDataSet.update(updates);
+        }
+        isPhysicsEnabled = true;
+        const btnPhys = document.getElementById("btn-graph-physics");
+        if (btnPhys) btnPhys.innerHTML = "[PHYSICS: ON]";
+        if (networkInstance) {
+            networkInstance.setOptions({ physics: { enabled: true } });
+        }
+        if (btn) {
+            btn.innerHTML = "[RADAR ORBITS]";
+            btn.className = "btn-tool text-sky-400 border-sky-500/30";
+        }
+        showToast("Organic physics restored.", "info");
+    }
+    if (networkInstance) networkInstance.redraw();
+}
+window.toggleRadarOrbits = toggleRadarOrbits;
+
+/**
+ * Filter Graph Nodes by Threat Severity / Risk Tier
+ */
+function filterGraphSeverity(sevTier) {
+    currentSeverityFilter = sevTier;
+    document.querySelectorAll(".btn-sev-filter").forEach(b => {
+        b.classList.toggle("active", b.getAttribute("data-sev") === sevTier);
+    });
+
+    if (!networkInstance || !rawGraphNodes || !currentNodesDataSet) return;
+    if (window.sfx) window.sfx.playSelect();
+
+    if (sevTier === "all") {
+        const processed = getProcessedNodes(rawGraphNodes);
+        currentNodesDataSet.clear();
+        currentNodesDataSet.add(processed);
+        currentEdgesDataSet.clear();
+        currentEdgesDataSet.add(rawGraphEdges);
+        showToast("Severity filter reset: Displaying all nodes.", "info");
+        return;
+    }
+
+    const tierPriority = {
+        critical: 4,
+        high: 3,
+        medium: 2,
+        low: 1,
+        info: 0
+    };
+
+    const minLevel = tierPriority[sevTier] || 0;
+    const visibleNodeIds = new Set();
+
+    rawGraphNodes.forEach(n => {
+        const nid = String(n.id || "");
+        const grp = String(n.group || "").toLowerCase();
+        const cat = String(n.category || "").toLowerCase();
+        const ndata = (n.data && typeof n.data === 'object') ? n.data : {};
+
+        // Always keep Target Root & Provenance Hubs as persistent anchors
+        if (grp === "employee" || cat === "identity" || nid.startsWith("emp_") || nid === "Target" || nid.startsWith("hub_") || ndata.type === "PROVENANCE_HUB") {
+            visibleNodeIds.add(n.id);
+            return;
+        }
+
+        const nodeSev = String(n.severity || ndata.severity || "MEDIUM").toLowerCase();
+        const pLevel = tierPriority[nodeSev] !== undefined ? tierPriority[nodeSev] : 2;
+        if (pLevel >= minLevel) {
+            visibleNodeIds.add(n.id);
+        }
+    });
+
+    const filteredNodes = getProcessedNodes(rawGraphNodes.filter(n => visibleNodeIds.has(n.id)));
+    const filteredEdges = rawGraphEdges.filter(e => visibleNodeIds.has(e.from) && visibleNodeIds.has(e.to));
+
+    currentNodesDataSet.clear();
+    currentNodesDataSet.add(filteredNodes);
+    currentEdgesDataSet.clear();
+    currentEdgesDataSet.add(filteredEdges);
+
+    networkInstance.fit({ animation: { duration: 400, easingFunction: "easeInOutQuad" } });
+    showToast(`Risk Filter applied: ${filteredNodes.length} nodes active.`, "success");
+}
+window.filterGraphSeverity = filterGraphSeverity;
+
+/**
+ * Interactive Credential Blast Radius & Lateral Takeover Simulator
+ */
+function triggerBlastRadiusSimulation(selectedNodeId = null) {
+    if (!networkInstance || !rawGraphNodes || !currentNodesDataSet || !rawGraphEdges) {
+        showToast("No active threat graph loaded to simulate blast radius.", "warning");
+        return;
+    }
+
+    let targetNode = null;
+    if (selectedNodeId) {
+        targetNode = rawGraphNodes.find(n => n.id === selectedNodeId);
+    } else {
+        const selected = networkInstance.getSelectedNodes();
+        if (selected && selected.length > 0) {
+            targetNode = rawGraphNodes.find(n => n.id === selected[0]);
+        }
+    }
+
+    // Auto-detect highest risk credential if none selected
+    if (!targetNode || (!String(targetNode.id).startsWith("cred_") && !String(targetNode.id).startsWith("leak_"))) {
+        targetNode = rawGraphNodes.find(n => {
+            const nd = n.data || {};
+            return String(n.id).startsWith("cred_") && (nd.password || nd.plaintext_password);
+        }) || rawGraphNodes.find(n => String(n.id).startsWith("cred_")) || rawGraphNodes.find(n => String(n.id).startsWith("leak_"));
+    }
+
+    if (!targetNode) {
+        showToast("Zero compromised credentials available for blast simulation.", "info");
+        return;
+    }
+
+    const parentHub = rawGraphNodes.find(n => String(n.id).startsWith("hub_") && getHubChildNodeIds(n.id).includes(targetNode.id));
+    if (parentHub && window.collapsedHubs.has(parentHub.id)) {
+        toggleGraphHub(parentHub.id);
+    }
+
+    const affectedNodeIds = new Set([targetNode.id]);
+    const cascadeEdgeIds = new Set();
+
+    const pathResult = findPathToTarget(targetNode.id);
+    if (pathResult) {
+        pathResult.nodes.forEach(nid => affectedNodeIds.add(nid));
+        pathResult.edges.forEach(eid => cascadeEdgeIds.add(eid));
+    }
+
+    const targetAccounts = rawGraphNodes.filter(n => {
+        const cat = String(n.category || "").toLowerCase();
+        const grp = String(n.group || "").toLowerCase();
+        return cat === "accounts" || cat === "git" || grp.includes("account") || grp.includes("git");
+    });
+
+    targetAccounts.forEach(acc => {
+        affectedNodeIds.add(acc.id);
+        rawGraphEdges.forEach(e => {
+            if ((e.from === acc.id || e.to === acc.id) && (affectedNodeIds.has(e.from) || affectedNodeIds.has(e.to))) {
+                cascadeEdgeIds.add(e.id || `${e.from}_${e.to}`);
+            }
+        });
+    });
+
+    const nodeUpdates = currentNodesDataSet.get().map(n => {
+        const isImpacted = affectedNodeIds.has(n.id);
+        const isEpicenter = n.id === targetNode.id;
+        return {
+            id: n.id,
+            opacity: isImpacted ? 1.0 : 0.08,
+            borderWidth: isEpicenter ? 4 : (isImpacted ? 2.5 : 1),
+            shadow: isEpicenter
+                ? { enabled: true, color: '#ef4444', size: 25 }
+                : (isImpacted ? { enabled: true, color: '#f59e0b', size: 14 } : { enabled: false })
+        };
+    });
+    currentNodesDataSet.update(nodeUpdates);
+
+    const edgeUpdates = currentEdgesDataSet.get().map(e => {
+        const isCascade = cascadeEdgeIds.has(e.id) || (affectedNodeIds.has(e.from) && affectedNodeIds.has(e.to));
+        return {
+            id: e.id,
+            width: isCascade ? 3.5 : 1,
+            color: isCascade ? { color: '#ef4444', highlight: '#f87171' } : { color: 'rgba(255,255,255,0.04)' },
+            dashes: !isCascade
+        };
+    });
+    currentEdgesDataSet.update(edgeUpdates);
+
+    networkInstance.fit({ nodes: Array.from(affectedNodeIds), animation: { duration: 600, easingFunction: 'easeInOutQuad' } });
+    renderBlastRadiusDossier(targetNode, targetAccounts);
+
+    if (window.sfx) window.sfx.playAlert();
+    showToast(`Credential Blast Radius: ${targetAccounts.length} services at risk of lateral compromise!`, "error");
+}
+window.triggerBlastRadiusSimulation = triggerBlastRadiusSimulation;
+
+/**
+ * Slide-In Blast Radius Dossier
+ */
+function renderBlastRadiusDossier(epicenterNode, vulnerableAccounts) {
+    const drawer = document.getElementById("node-inspector");
+    const titleEl = document.getElementById("inspector-node-title");
+    const bodyEl = document.getElementById("inspector-node-body");
+    if (!drawer || !bodyEl) return;
+
+    drawer.style.display = "block";
+    if (titleEl) titleEl.innerHTML = `<span style="color: #ef4444; font-weight: 700;">[BLAST RADIUS SIMULATION]</span>`;
+
+    const nd = epicenterNode.data || {};
+    const secretStr = nd.password || nd.plaintext_password || nd.password_hash || epicenterNode.label.split('\n')[0];
+    const originLeak = nd.name || epicenterNode.label.split('\n')[0];
+
+    const accountListHtml = vulnerableAccounts.slice(0, 8).map(acc => {
+        const lbl = acc.label.split('\n')[0];
+        return `
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; background: rgba(244, 63, 94, 0.08); border: 1px solid rgba(244, 63, 94, 0.2); border-radius: 4px; font-size: 11px;">
+                <span style="color: #f8fafc; font-weight: 600;">${escapeHtml(lbl)}</span>
+                <span class="badge-pill" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; font-size: 9px;">CRITICAL TAKEOVER</span>
+            </div>
+        `;
+    }).join("");
+
+    bodyEl.innerHTML = `
+        <div style="padding: 10px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; margin-bottom: 12px;">
+            <div style="font-size: 10px; color: #f87171; font-weight: 700; text-transform: uppercase;">Cascade Epicenter:</div>
+            <div style="font-size: 13px; font-weight: 700; color: #ffffff; word-break: break-all; margin: 2px 0 6px 0;">${escapeHtml(secretStr)}</div>
+            <div style="font-size: 10px; color: #fca5a5;">Source: ${escapeHtml(originLeak)}</div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">TAKEOVER PROBABILITY:</span>
+                <span style="font-size: 12px; color: #ef4444; font-weight: 700;">94% [CRITICAL]</span>
+            </div>
+            <div style="width: 100%; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden;">
+                <div style="width: 94%; height: 100%; background: linear-gradient(90deg, #f59e0b, #ef4444);"></div>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+            <div style="font-size: 11px; font-weight: 700; color: #f59e0b; margin-bottom: 6px;">VULNERABLE LATERAL ACCOUNTS (${vulnerableAccounts.length}):</div>
+            <div style="display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto;">
+                ${accountListHtml || '<div style="color: #64748b; font-size: 11px;">Target accounts directly exposed.</div>'}
+            </div>
+        </div>
+
+        <div style="margin-bottom: 12px; padding: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px;">
+            <div style="font-size: 10px; color: #38bdf8; font-weight: 700; margin-bottom: 4px;">MITRE ATT&amp;CK ALIGNMENT:</div>
+            <div style="font-size: 10px; color: #cbd5e1; line-height: 1.4;">
+                &bull; <strong>T1110.004</strong>: Credential Stuffing<br>
+                &bull; <strong>T1078.004</strong>: Valid Cloud Accounts Takeover<br>
+                &bull; <strong>T1586.002</strong>: Compromised Social &amp; Dev Portals
+            </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button type="button" class="btn-action-tool w-full text-xs font-mono py-1.5 text-zinc-300" onclick="restoreGraphOpacities()">
+                Reset Blast Simulation
+            </button>
+        </div>
+    `;
+}
+window.renderBlastRadiusDossier = renderBlastRadiusDossier;
+
+/**
+ * Chronological Attack Surface Time-Travel Scrubber
+ */
+function handleTimelineScrub(yearVal) {
+    const year = parseInt(yearVal);
+    const badge = document.getElementById("timeline-epoch-badge");
+    const maxYear = 2026;
+
+    if (badge) {
+        badge.innerText = (year >= maxYear) ? "ALL TIME" : `≤ ${year}`;
+        badge.className = (year >= maxYear)
+            ? "px-2 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30 font-bold text-[11px]"
+            : "px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold text-[11px]";
+    }
+
+    if (!currentNodesDataSet || !rawGraphNodes) return;
+
+    const visibleNodeIds = new Set();
+    const nodeUpdates = currentNodesDataSet.get().map(n => {
+        const rawNode = rawGraphNodes.find(rn => rn.id === n.id);
+        const nodeYear = (rawNode && rawNode.year) || (rawNode && rawNode.data && rawNode.data.year) || null;
+
+        const isVisible = (year >= maxYear) || (nodeYear === null) || (nodeYear <= year);
+        if (isVisible) visibleNodeIds.add(n.id);
+
+        return {
+            id: n.id,
+            opacity: isVisible ? 1.0 : 0.08
+        };
+    });
+    currentNodesDataSet.update(nodeUpdates);
+
+    const edgeUpdates = currentEdgesDataSet.get().map(e => {
+        const isConn = visibleNodeIds.has(e.from) && visibleNodeIds.has(e.to);
+        return {
+            id: e.id,
+            color: isConn ? { color: '#384259', highlight: '#7dd3fc' } : { color: 'rgba(255,255,255,0.03)' }
+        };
+    });
+    currentEdgesDataSet.update(edgeUpdates);
+}
+window.handleTimelineScrub = handleTimelineScrub;
+
+function toggleTimelinePlayback() {
+    const btn = document.getElementById("btn-timeline-play");
+    const icon = document.getElementById("timeline-play-icon");
+    const text = document.getElementById("timeline-play-text");
+    const slider = document.getElementById("graph-timeline-slider");
+    if (!slider) return;
+
+    if (timelinePlaybackTimer) {
+        clearInterval(timelinePlaybackTimer);
+        timelinePlaybackTimer = null;
+        if (icon) icon.innerText = "▶";
+        if (text) text.innerText = "PLAY EPOCH";
+        if (btn) btn.className = "btn-tool text-sky-400 border-sky-500/30";
+        showToast("Timeline playback paused.", "info");
+    } else {
+        let current = parseInt(slider.value);
+        const min = parseInt(slider.min) || 2012;
+        const max = parseInt(slider.max) || 2026;
+        if (current >= max) current = min;
+
+        slider.value = current;
+        handleTimelineScrub(current);
+
+        if (icon) icon.innerText = "⏸";
+        if (text) text.innerText = "PAUSE";
+        if (btn) btn.className = "btn-tool text-amber-400 border-amber-500/50 bg-amber-500/10";
+        showToast("Playing chronological threat evolution...", "info");
+
+        timelinePlaybackTimer = setInterval(() => {
+            current += 1;
+            if (current > max) {
+                clearInterval(timelinePlaybackTimer);
+                timelinePlaybackTimer = null;
+                slider.value = max;
+                handleTimelineScrub(max);
+                if (icon) icon.innerText = "▶";
+                if (text) text.innerText = "PLAY EPOCH";
+                if (btn) btn.className = "btn-tool text-sky-400 border-sky-500/30";
+                if (window.sfx) window.sfx.playVictory();
+                showToast("Reached present attack surface.", "success");
+                return;
+            }
+            slider.value = current;
+            handleTimelineScrub(current);
+            if (window.sfx) window.sfx.playSelect();
+        }, 1100);
+    }
+}
+window.toggleTimelinePlayback = toggleTimelinePlayback;
+
+function resetTimelineEpoch() {
+    const slider = document.getElementById("graph-timeline-slider");
+    if (timelinePlaybackTimer) {
+        clearInterval(timelinePlaybackTimer);
+        timelinePlaybackTimer = null;
+    }
+    const btn = document.getElementById("btn-timeline-play");
+    const icon = document.getElementById("timeline-play-icon");
+    const text = document.getElementById("timeline-play-text");
+    if (icon) icon.innerText = "▶";
+    if (text) text.innerText = "PLAY EPOCH";
+    if (btn) btn.className = "btn-tool text-sky-400 border-sky-500/30";
+
+    if (slider) {
+        slider.value = slider.max || 2026;
+        handleTimelineScrub(slider.value);
+    }
+    restoreGraphOpacities();
+    showToast("Reset to full all-time attack surface.", "info");
+}
+window.resetTimelineEpoch = resetTimelineEpoch;
+
+function initGraphTimelineScrubber(nodes) {
+    const slider = document.getElementById("graph-timeline-slider");
+    const minYearEl = document.getElementById("timeline-min-year");
+    const badge = document.getElementById("timeline-epoch-badge");
+    if (!slider || !nodes || !nodes.length) return;
+
+    let minYear = 2026;
+    nodes.forEach(n => {
+        const y = n.year || (n.data && n.data.year);
+        if (y && y > 1990 && y < minYear) minYear = y;
+    });
+
+    if (minYear >= 2026) minYear = 2012;
+
+    slider.min = minYear;
+    slider.max = 2026;
+    slider.value = 2026;
+    if (minYearEl) minYearEl.innerText = String(minYear);
+    if (badge) {
+        badge.innerText = "ALL TIME";
+        badge.className = "px-2 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30 font-bold text-[11px]";
+    }
+}
+window.initGraphTimelineScrubber = initGraphTimelineScrubber;
+
 
 /**
  * Render Vis.js interactive graph
@@ -5558,6 +7721,13 @@ function renderGraph(graphData) {
 
     networkInstance = new vis.Network(container, data, options);
 
+    // Register tactical radar grid background drawing on canvas
+    networkInstance.on("beforeDrawing", (ctx) => {
+        if (typeof drawRadarGridBackground === "function") {
+            drawRadarGridBackground(ctx);
+        }
+    });
+
     // If a category was previously filtered, apply it
     if (currentCategoryFilter && currentCategoryFilter !== "all") {
         filterGraphCategory(currentCategoryFilter);
@@ -5566,11 +7736,523 @@ function renderGraph(graphData) {
     // Node click handler
     networkInstance.on("click", (params) => {
         if (params.nodes.length > 0) {
+            const clickedId = params.nodes[0];
             if (window.sfx) window.sfx.playInspect();
-            renderNodeInspector(params.nodes[0]);
+            renderNodeInspector(clickedId);
+            highlightNodeNeighborhood(clickedId);
+        } else {
+            restoreGraphOpacities();
         }
     });
+
+    // Double-click handler for instant ledger drill-down & hub folding
+    networkInstance.on("doubleClick", (params) => {
+        if (params.nodes && params.nodes.length > 0) {
+            handleGraphNodeDoubleClick(params.nodes[0]);
+        }
+    });
+
+    // Reset cluster fold UI state
+    updateFoldAllButtonUI();
+
+    // Initialize attack surface chronological scrubber
+    initGraphTimelineScrubber(rawGraphNodes);
 }
+
+/**
+ * ==========================================================================
+ * GRAPH INTELLIGENCE & ANALYTIC CAPABILITIES
+ * ==========================================================================
+ */
+
+let activeHighlightedNode = null;
+window.collapsedHubs = window.collapsedHubs || new Set();
+
+/**
+ * In-Graph Node Search & Camera Jump
+ */
+function searchAndFocusGraphNode(query) {
+    const q = (query || "").toLowerCase().trim();
+    const clearBtn = document.getElementById("btn-clear-graph-search");
+    if (clearBtn) clearBtn.classList.toggle("hidden", !q);
+
+    if (!networkInstance || !currentNodesDataSet) return;
+
+    if (!q) {
+        networkInstance.unselectAll();
+        restoreGraphOpacities();
+        activeHighlightedNode = null;
+        return;
+    }
+
+    const allNodes = currentNodesDataSet.get();
+    const match = allNodes.find(n => {
+        const lbl = (n.label || "").toLowerCase();
+        const nid = String(n.id || "").toLowerCase();
+        const grp = (n.group || "").toLowerCase();
+        const pval = (n.data && n.data.value ? String(n.data.value) : "").toLowerCase();
+        return lbl.includes(q) || nid.includes(q) || grp.includes(q) || pval.includes(q);
+    });
+
+    if (match) {
+        activeHighlightedNode = match.id;
+        networkInstance.selectNodes([match.id]);
+        networkInstance.focus(match.id, {
+            scale: 1.4,
+            animation: { duration: 400, easingFunction: "easeInOutQuad" }
+        });
+        renderNodeInspector(match.id);
+        highlightNodeNeighborhood(match.id);
+        if (window.sfx) window.sfx.playSelect();
+    }
+}
+window.searchAndFocusGraphNode = searchAndFocusGraphNode;
+
+function clearGraphSearch() {
+    const input = document.getElementById("graph-node-search");
+    if (input) {
+        input.value = "";
+        searchAndFocusGraphNode("");
+        input.focus();
+    }
+}
+window.clearGraphSearch = clearGraphSearch;
+
+/**
+ * Get all descendant/connected leaf node IDs for a given hub
+ */
+function getHubChildNodeIds(hubId) {
+    if (!rawGraphEdges || !rawGraphNodes) return [];
+    const directChildren = new Set();
+    rawGraphEdges.forEach(e => {
+        if (e.from === hubId && !String(e.to).startsWith("emp_") && e.to !== "Target") {
+            directChildren.add(e.to);
+        } else if (e.to === hubId && !String(e.from).startsWith("emp_") && e.from !== "Target") {
+            directChildren.add(e.from);
+        }
+    });
+
+    const allDescendants = new Set(directChildren);
+    rawGraphEdges.forEach(e => {
+        if (directChildren.has(e.from) && !String(e.to).startsWith("hub_") && !String(e.to).startsWith("emp_") && e.to !== "Target") {
+            allDescendants.add(e.to);
+        }
+        if (directChildren.has(e.to) && !String(e.from).startsWith("hub_") && !String(e.from).startsWith("emp_") && e.from !== "Target") {
+            allDescendants.add(e.from);
+        }
+    });
+
+    return Array.from(allDescendants);
+}
+
+/**
+ * Toggle fold state for a specific hub
+ */
+function toggleGraphHub(hubId) {
+    if (!networkInstance || !currentNodesDataSet) return;
+    const childIds = getHubChildNodeIds(hubId);
+    if (!childIds.length) {
+        showToast("No branch children attached to this hub.", "info");
+        return;
+    }
+
+    const isCollapsed = window.collapsedHubs.has(hubId);
+    if (isCollapsed) {
+        // Expand
+        window.collapsedHubs.delete(hubId);
+        const nodesToShow = getProcessedNodes(rawGraphNodes.filter(n => childIds.includes(n.id)));
+        const edgesToShow = rawGraphEdges.filter(e =>
+            (childIds.includes(e.from) || e.from === hubId) &&
+            (childIds.includes(e.to) || e.to === hubId)
+        );
+        currentNodesDataSet.update(nodesToShow);
+        currentEdgesDataSet.update(edgesToShow);
+
+        const origHub = rawGraphNodes.find(n => n.id === hubId);
+        if (origHub) {
+            currentNodesDataSet.update({ id: hubId, label: origHub.label, borderWidth: 2 });
+        }
+        showToast(`Expanded ${origHub ? origHub.label.split('\n')[0] : 'Hub'} (+${childIds.length} nodes)`, "info");
+    } else {
+        // Collapse
+        window.collapsedHubs.add(hubId);
+        currentNodesDataSet.remove(childIds);
+
+        const origHub = rawGraphNodes.find(n => n.id === hubId);
+        const hubTitle = origHub ? origHub.label.split('\n')[0] : "HUB";
+        currentNodesDataSet.update({
+            id: hubId,
+            label: `${hubTitle}\n[${childIds.length} FOLDED NODES]\n(Click to Expand)`,
+            borderWidth: 3
+        });
+        showToast(`Folded ${hubTitle} (${childIds.length} nodes hidden)`, "info");
+    }
+
+    if (window.sfx) window.sfx.playSelect();
+    updateFoldAllButtonUI();
+}
+window.toggleGraphHub = toggleGraphHub;
+
+/**
+ * Toggle folding on ALL hubs at once for instant macro decluttering
+ */
+function toggleAllGraphHubs() {
+    if (!networkInstance || !rawGraphNodes) return;
+    const allHubIds = rawGraphNodes.filter(n => String(n.id).startsWith("hub_")).map(n => n.id);
+    if (!allHubIds.length) return;
+
+    const anyUnfolded = allHubIds.some(hid => !window.collapsedHubs.has(hid));
+    if (anyUnfolded) {
+        allHubIds.forEach(hid => {
+            if (!window.collapsedHubs.has(hid)) toggleGraphHub(hid);
+        });
+        showToast("All hubs folded. Graph decluttered.", "success");
+    } else {
+        allHubIds.forEach(hid => {
+            if (window.collapsedHubs.has(hid)) toggleGraphHub(hid);
+        });
+        showToast("All hubs expanded. Full topology revealed.", "info");
+    }
+    updateFoldAllButtonUI();
+}
+window.toggleAllGraphHubs = toggleAllGraphHubs;
+
+function updateFoldAllButtonUI() {
+    const btn = document.getElementById("btn-graph-fold-all");
+    if (!btn || !rawGraphNodes) return;
+    const allHubIds = rawGraphNodes.filter(n => String(n.id).startsWith("hub_")).map(n => n.id);
+    const anyUnfolded = allHubIds.some(hid => !window.collapsedHubs.has(hid));
+    btn.innerHTML = anyUnfolded ? "[FOLD HUBS]" : "[UNFOLD HUBS]";
+    btn.className = `btn-tool ${anyUnfolded ? 'text-amber-400 border-amber-500/30' : 'text-emerald-400 border-emerald-500/30'}`;
+}
+
+/**
+ * Shortest path BFS from startNodeId back to Target/Root
+ */
+function findPathToTarget(startNodeId) {
+    if (!rawGraphEdges || !rawGraphNodes) return null;
+    const targetNode = rawGraphNodes.find(n => n.group === "employee" || n.group === "identity" || String(n.id).startsWith("emp_") || n.id === "Target");
+    if (!targetNode) return null;
+    const targetId = targetNode.id;
+    if (startNodeId === targetId) return { nodes: [targetId], edges: [] };
+
+    const adj = new Map();
+    rawGraphEdges.forEach(e => {
+        if (!adj.has(e.from)) adj.set(e.from, []);
+        if (!adj.has(e.to)) adj.set(e.to, []);
+        adj.get(e.from).push({ to: e.to, edgeId: e.id || `${e.from}_${e.to}` });
+        adj.get(e.to).push({ to: e.from, edgeId: e.id || `${e.from}_${e.to}` });
+    });
+
+    const queue = [[startNodeId]];
+    const edgeQueue = [[]];
+    const visited = new Set([startNodeId]);
+
+    while (queue.length > 0) {
+        const path = queue.shift();
+        const edgePath = edgeQueue.shift();
+        const curr = path[path.length - 1];
+
+        if (curr === targetId) {
+            return { nodes: path, edges: edgePath };
+        }
+
+        const neighbors = adj.get(curr) || [];
+        for (const nb of neighbors) {
+            if (!visited.has(nb.to)) {
+                visited.add(nb.to);
+                queue.push([...path, nb.to]);
+                edgeQueue.push([...edgePath, nb.edgeId]);
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Highlight and trace attack path visually on the canvas
+ */
+function tracePathFromNode(nodeId) {
+    if (!networkInstance || !currentNodesDataSet) return;
+
+    const parentHub = rawGraphNodes.find(n => String(n.id).startsWith("hub_") && getHubChildNodeIds(n.id).includes(nodeId));
+    if (parentHub && window.collapsedHubs.has(parentHub.id)) {
+        toggleGraphHub(parentHub.id);
+    }
+
+    const pathResult = findPathToTarget(nodeId);
+    if (!pathResult || !pathResult.nodes.length) {
+        showToast("No direct traversal path found from this entity to target root.", "warning");
+        return;
+    }
+
+    const pathNodes = new Set(pathResult.nodes);
+    const pathEdges = new Set(pathResult.edges);
+
+    const updates = currentNodesDataSet.get().map(n => {
+        const isPath = pathNodes.has(n.id);
+        return {
+            id: n.id,
+            opacity: isPath ? 1.0 : 0.12,
+            borderWidth: isPath ? 3.5 : 1,
+            shadow: isPath ? { enabled: true, color: '#38bdf8', size: 15 } : { enabled: false }
+        };
+    });
+    currentNodesDataSet.update(updates);
+
+    const edgeUpdates = currentEdgesDataSet.get().map(e => {
+        const isPath = pathEdges.has(e.id) || (pathNodes.has(e.from) && pathNodes.has(e.to));
+        return {
+            id: e.id,
+            width: isPath ? 4 : 1,
+            color: isPath ? { color: '#38bdf8', highlight: '#7dd3fc', hover: '#7dd3fc' } : { color: 'rgba(255,255,255,0.06)' },
+            dashes: !isPath
+        };
+    });
+    currentEdgesDataSet.update(edgeUpdates);
+
+    networkInstance.selectNodes(pathResult.nodes);
+    networkInstance.fit({ nodes: pathResult.nodes, animation: { duration: 600, easingFunction: 'easeInOutQuad' } });
+
+    const bodyEl = document.getElementById("inspector-node-body");
+    if (bodyEl) {
+        const breadcrumbs = pathResult.nodes.map((nid, i) => {
+            const nd = rawGraphNodes.find(n => n.id === nid);
+            const lbl = nd ? nd.label.split('\n')[0] : nid;
+            return `<div class="path-step" style="display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 11px;">
+                <span class="mono" style="padding: 2px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-weight: 700;">0${i + 1}</span>
+                <span style="color: #f1f5f9; font-weight: 600;">${escapeHtml(lbl)}</span>
+            </div>`;
+        }).join('<div style="color: #64748b; text-align: center; font-family: monospace; font-size: 10px; margin: 2px 0;">&darr; [EXPLOIT HOP]</div>');
+
+        const pathBox = `
+            <div style="margin-bottom: 0.8rem; padding: 0.75rem; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px;">
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 0.5rem;">
+                    [ATTACK VECTOR TRAVERSAL CHAIN (${pathResult.nodes.length} HOPS)]
+                </div>
+                ${breadcrumbs}
+                <button type="button" class="btn-action-tool w-full text-xs font-mono py-1.5 mt-2.5 text-zinc-300" onclick="restoreGraphOpacities()">
+                    <span>Reset Focus &amp; Opacity</span>
+                </button>
+            </div>
+        `;
+        bodyEl.innerHTML = pathBox + bodyEl.innerHTML;
+    }
+
+    if (window.sfx) window.sfx.playAlert();
+    showToast(`Attack path identified: ${pathResult.nodes.length} identity hops to target.`, "success");
+}
+window.tracePathFromNode = tracePathFromNode;
+
+function traceSelectedNodePath() {
+    if (!networkInstance) return;
+    const selected = networkInstance.getSelectedNodes();
+    if (selected && selected.length > 0) {
+        tracePathFromNode(selected[0]);
+    } else {
+        showToast("Please click a node on the graph first to trace its attack path.", "info");
+    }
+}
+window.traceSelectedNodePath = traceSelectedNodePath;
+
+function restoreGraphOpacities() {
+    if (!currentNodesDataSet || !currentEdgesDataSet) return;
+    const isLightMode = isCurrentThemeLight();
+    const nodeUpdates = currentNodesDataSet.get().map(n => ({
+        id: n.id,
+        opacity: 1.0,
+        borderWidth: 1.5,
+        shadow: { enabled: true, color: isLightMode ? 'rgba(15,23,42,0.1)' : 'rgba(0,0,0,0.5)', size: 8 }
+    }));
+    currentNodesDataSet.update(nodeUpdates);
+
+    const edgeUpdates = currentEdgesDataSet.get().map(e => ({
+        id: e.id,
+        width: 1,
+        color: isLightMode ? { color: '#94a3b8', highlight: '#0284c7' } : { color: '#384259', highlight: '#7dd3fc' },
+        dashes: false
+    }));
+    currentEdgesDataSet.update(edgeUpdates);
+}
+window.restoreGraphOpacities = restoreGraphOpacities;
+
+function highlightNodeNeighborhood(nodeId) {
+    if (!networkInstance || !currentNodesDataSet || !rawGraphEdges) return;
+    const connectedNodeIds = new Set([nodeId]);
+    const connectedEdgeIds = new Set();
+
+    rawGraphEdges.forEach(e => {
+        if (e.from === nodeId) {
+            connectedNodeIds.add(e.to);
+            connectedEdgeIds.add(e.id || `${e.from}_${e.to}`);
+        } else if (e.to === nodeId) {
+            connectedNodeIds.add(e.from);
+            connectedEdgeIds.add(e.id || `${e.from}_${e.to}`);
+        }
+    });
+
+    const nodeUpdates = currentNodesDataSet.get().map(n => ({
+        id: n.id,
+        opacity: connectedNodeIds.has(n.id) ? 1.0 : 0.15,
+        borderWidth: n.id === nodeId ? 3.5 : (connectedNodeIds.has(n.id) ? 2.5 : 1),
+        shadow: connectedNodeIds.has(n.id) ? { enabled: true, color: '#38bdf8', size: 12 } : { enabled: false }
+    }));
+    currentNodesDataSet.update(nodeUpdates);
+
+    const edgeUpdates = currentEdgesDataSet.get().map(e => {
+        const isConn = connectedEdgeIds.has(e.id) || (connectedNodeIds.has(e.from) && connectedNodeIds.has(e.to));
+        return {
+            id: e.id,
+            width: isConn ? 3 : 1,
+            color: isConn ? { color: '#38bdf8', highlight: '#7dd3fc' } : { color: 'rgba(255,255,255,0.06)' }
+        };
+    });
+    currentEdgesDataSet.update(edgeUpdates);
+}
+window.highlightNodeNeighborhood = highlightNodeNeighborhood;
+
+/**
+ * Export High-Resolution PNG Intelligence Graph Snapshot
+ */
+function exportGraphPNG() {
+    if (!networkInstance) {
+        showToast("No active threat graph to export.", "warning");
+        return;
+    }
+
+    try {
+        const visCanvas = document.querySelector("#network-graph canvas");
+        if (!visCanvas) {
+            showToast("Graph canvas not ready for capture.", "warning");
+            return;
+        }
+
+        const exportCanvas = document.createElement("canvas");
+        const ctx = exportCanvas.getContext("2d");
+        exportCanvas.width = visCanvas.width;
+        exportCanvas.height = visCanvas.height;
+
+        ctx.fillStyle = "#090A0F";
+        ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+        ctx.drawImage(visCanvas, 0, 0);
+
+        ctx.fillStyle = "rgba(14, 17, 23, 0.85)";
+        ctx.fillRect(0, 0, exportCanvas.width, 42);
+        ctx.fillStyle = "#38bdf8";
+        ctx.font = "bold 13px 'JetBrains Mono', monospace";
+        ctx.fillText(`BREACHSPILLOVER IDENTITY TOPOLOGY GRAPH // TARGET: ${currentEmail || 'UNKNOWN'}`, 16, 26);
+
+        ctx.fillStyle = "#64748b";
+        ctx.font = "10px 'JetBrains Mono', monospace";
+        ctx.fillText(`GENERATED: ${new Date().toISOString()} // CLASSIFICATION: TLP:AMBER`, 16, exportCanvas.height - 14);
+
+        const link = document.createElement("a");
+        const slug = (currentEmail || "graph").replace(/[^a-zA-Z0-9]/g, "_");
+        link.download = `breach_topology_${slug}_${Date.now()}.png`;
+        link.href = exportCanvas.toDataURL("image/png");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        if (window.sfx) window.sfx.playVictory();
+        showToast("High-resolution PNG intelligence graph exported.", "success");
+    } catch (e) {
+        console.error("Graph PNG export failed:", e);
+        showToast("Unable to export graph image.", "error");
+    }
+}
+window.exportGraphPNG = exportGraphPNG;
+
+/**
+ * Focus camera onto specific entity node in graph and highlight it
+ */
+function focusGraphOnEntity(entityType, entityValue) {
+    if (!networkInstance || !rawGraphNodes || !currentNodesDataSet) return;
+    const val = (entityValue || "").toLowerCase().trim();
+    if (!val) return;
+
+    const targetNode = rawGraphNodes.find(n => {
+        const lbl = (n.label || "").toLowerCase();
+        const pval = (n.data && n.data.value ? String(n.data.value) : "").toLowerCase();
+        const nid = String(n.id || "").toLowerCase();
+        return lbl.includes(val) || pval.includes(val) || nid.includes(val);
+    });
+
+    if (!targetNode) return;
+
+    const parentHub = rawGraphNodes.find(n => String(n.id).startsWith("hub_") && getHubChildNodeIds(n.id).includes(targetNode.id));
+    if (parentHub && window.collapsedHubs.has(parentHub.id)) {
+        toggleGraphHub(parentHub.id);
+    }
+
+    const graphPanel = document.querySelector(".graph-panel");
+    if (graphPanel) {
+        graphPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    setTimeout(() => {
+        networkInstance.selectNodes([targetNode.id]);
+        networkInstance.focus(targetNode.id, {
+            scale: 1.5,
+            animation: { duration: 450, easingFunction: "easeInOutQuad" }
+        });
+        renderNodeInspector(targetNode.id);
+        highlightNodeNeighborhood(targetNode.id);
+        if (window.sfx) window.sfx.playSelect();
+    }, 150);
+}
+window.focusGraphOnEntity = focusGraphOnEntity;
+
+/**
+ * Handle double click on graph node to navigate directly to matching evidence ledger tab
+ */
+function handleGraphNodeDoubleClick(nodeId) {
+    if (!nodeId || !rawGraphNodes) return;
+    const node = rawGraphNodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    if (String(node.id).startsWith("hub_")) {
+        toggleGraphHub(node.id);
+        return;
+    }
+
+    const grp = (node.group || "").toLowerCase();
+    const cat = (node.category || (node.data && node.data.category) || "").toLowerCase();
+
+    const switchAndScroll = (tabName) => {
+        const tabBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+        if (tabBtn) tabBtn.click();
+        const evidenceSection = document.querySelector(".evidence-section");
+        if (evidenceSection) {
+            evidenceSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    };
+
+    if (grp.includes("breach") || cat === "breaches") {
+        switchAndScroll("tab-leaks");
+        showToast(`Navigated to Breach Disclosures ledger for: ${node.label.split('\n')[0]}`, "info");
+    } else if (grp.includes("cred") || cat === "credentials") {
+        switchAndScroll("tab-creds");
+        showToast(`Navigated to Credential Vault for: ${node.label.split('\n')[0]}`, "info");
+    } else if (grp.includes("telecom") || cat === "telecom") {
+        switchAndScroll("tab-telecom");
+        showToast(`Navigated to Telecom Recon for: ${node.label.split('\n')[0]}`, "info");
+    } else if (grp.includes("geo") || grp.includes("physical") || cat === "geo") {
+        switchAndScroll("tab-physical");
+        showToast(`Navigated to Geolocation & Map for: ${node.label.split('\n')[0]}`, "info");
+    } else if (grp.includes("account") || grp.includes("git") || grp.includes("pivot")) {
+        switchAndScroll("tab-pivots");
+        showToast(`Navigated to Verified Pivots for: ${node.label.split('\n')[0]}`, "info");
+    }
+}
+window.handleGraphNodeDoubleClick = handleGraphNodeDoubleClick;
+
+function closeNodeInspector() {
+    const drawer = document.getElementById("node-inspector");
+    if (drawer) drawer.style.display = "none";
+    if (window.sfx) window.sfx.playSelect();
+}
+window.closeNodeInspector = closeNodeInspector;
 
 /**
  * Slide-in Node Inspector
@@ -5594,6 +8276,35 @@ function renderNodeInspector(nodeId) {
         <div style="margin-bottom: 0.75rem;">
             <div style="color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Entity Classification:</div>
             <div style="margin-top: 0.2rem;"><span class="badge-pill badge-low">${escapeHtml(node.group)}</span></div>
+        </div>
+    `;
+
+    // Direct Graph Intelligence Quick Actions Strip
+    html += `
+        <div style="margin-bottom: 0.75rem; padding: 0.6rem; background: rgba(56, 189, 248, 0.06); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px;">
+            <div style="color: #38bdf8; font-size: 0.68rem; font-family: 'JetBrains Mono', monospace; font-weight: 700; margin-bottom: 0.4rem; text-transform: uppercase;">Graph Intelligence Actions:</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem;">
+                <button type="button" class="btn-action-tool text-xs font-mono py-1 px-2 text-emerald-400 border-emerald-500/30" onclick="tracePathFromNode('${escapeHtml(nodeId)}')">
+                    <span>Trace Path</span>
+                </button>
+                <button type="button" class="btn-action-tool text-xs font-mono py-1 px-2 text-sky-400 border-sky-500/30" onclick="highlightNodeNeighborhood('${escapeHtml(nodeId)}')">
+                    <span>Isolate 1-Hop</span>
+                </button>
+            </div>
+            ${String(nodeId).startsWith("hub_") ? `
+                <button type="button" class="btn-action-tool w-full text-xs font-mono py-1 mt-1.5 text-amber-400 border-amber-500/30" onclick="toggleGraphHub('${escapeHtml(nodeId)}')">
+                    <span>Toggle Fold Cluster</span>
+                </button>
+            ` : `
+                ${(String(nodeId).startsWith("cred_") || node.group === "credential" || String(nodeId).startsWith("leak_")) ? `
+                    <button type="button" class="btn-action-tool w-full text-xs font-mono py-1 mt-1.5 text-rose-400 border-rose-500/40 hover:bg-rose-500/20" onclick="triggerBlastRadiusSimulation('${escapeHtml(nodeId)}')">
+                        <span>⚡ Simulate Credential Blast Radius</span>
+                    </button>
+                ` : ''}
+                <button type="button" class="btn-action-tool w-full text-xs font-mono py-1 mt-1.5 text-zinc-300 border-white/[0.08]" onclick="handleGraphNodeDoubleClick('${escapeHtml(nodeId)}')">
+                    <span>Open in Forensic Ledger &rarr;</span>
+                </button>
+            `}
         </div>
     `;
 
@@ -5745,24 +8456,92 @@ function renderNodeInspector(nodeId) {
         } else if (node.data?.raw_value) {
             pivotType = node.data.pivot_type || "ENTITY";
             pivotValue = node.data.raw_value;
-        } else if (node.data?.value) {
-            pivotType = node.data.pivot_type || "ENTITY";
-            pivotValue = node.data.value;
+        } else if (node.data?.type === "PHYSICAL_ADDRESS" || node.group === "physical") {
+            pivotType = "LOCATION";
+            pivotValue = node.data?.city || node.data?.address || node.label;
+        } else if (node.data?.type === "LEAK" || (node.id && (node.id.startsWith("leak_") || node.id.startsWith("breach_")))) {
+            pivotType = "LEAK";
+            pivotValue = node.data?.leak_name || node.label;
         }
     }
 
-    html += `
+    const isHubNode = node.id && node.id.startsWith("hub_");
+    const isLeakNode = pivotType === "LEAK" || pivotType === "BREACH" || (node.id && (node.id.startsWith("leak_") || node.id.startsWith("breach_")));
+    const isLocationNode = pivotType === "LOCATION" || (node.data && node.data.type === "PHYSICAL_ADDRESS");
+    const isOrganizationNode = pivotType === "ORGANIZATION" || pivotType === "COMPANY";
+    const canDirectPivot = Boolean(pivotValue && (
+        pivotType === "EMAIL" ||
+        pivotType === "USERNAME" ||
+        pivotType === "HANDLE" ||
+        pivotType === "NAME" ||
+        pivotType === "HASH" ||
+        pivotType === "DOMAIN" ||
+        pivotType === "PHONE" ||
+        isLeakNode ||
+        isLocationNode ||
+        isOrganizationNode
+    ));
+
+    let actionButtonsHtml = `
         <div style="margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 8px;">
-            ${(pivotValue && (pivotType || node.data?.can_pivot)) ? `
-                <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #04131f; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(56, 189, 248, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="pivotOnEntity('${escapeHtml(pivotType)}', '${escapeHtml(pivotValue)}')">
-                    [PIVOT ON THIS ENTITY: ${escapeHtml(pivotType || 'INVESTIGATE')}]
-                </button>
-            ` : ''}
+    `;
+
+    if (isHubNode) {
+        actionButtonsHtml += `
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #334155, #475569); color: #f8fafc; font-weight: 700; border: none; cursor: pointer; border-radius: 4px;" onclick="filterGraphCategory('${escapeHtml(node.data?.category || 'all')}'); showToast('Filtered graph category: ${escapeHtml(node.data?.category || 'all')}', 'info');">
+                [FILTER CANVAS: ${(node.data?.category || 'CATEGORY').toUpperCase()}]
+            </button>
+        `;
+    } else if (isLeakNode) {
+        actionButtonsHtml += `
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #04131f; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(56, 189, 248, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="pivotOnEntity('LEAK', '${escapeHtml(pivotValue || node.label)}')">
+                [VIEW INCIDENT IN BREACH DISCLOSURES]
+            </button>
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(16, 185, 129, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="expandGraphFromNode('${escapeHtml(nodeId)}', 'LEAK', '${escapeHtml(pivotValue || node.label)}')">
+                [EXPAND BREACH VICTIMS (+)]
+            </button>
+        `;
+    } else if (isLocationNode) {
+        actionButtonsHtml += `
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #04131f; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(56, 189, 248, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="pivotOnEntity('LOCATION', '${escapeHtml(pivotValue)}')">
+                [VIEW IN GEOLOCATION & MAP]
+            </button>
             <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(16, 185, 129, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="expandGraphFromNode('${escapeHtml(nodeId)}', '${escapeHtml(pivotType)}', '${escapeHtml(pivotValue)}')">
                 [EXPAND GRAPH FROM NODE (+)]
             </button>
-        </div>
-    `;
+        `;
+    } else if (isOrganizationNode) {
+        const orgLabel = pivotValue.length > 22 ? pivotValue.substring(0, 20) + "..." : pivotValue;
+        actionButtonsHtml += `
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #04131f; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(56, 189, 248, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="pivotOnEntity('ORGANIZATION', '${escapeHtml(pivotValue)}')">
+                [CORRELATE ORG INTEL: ${escapeHtml(orgLabel)}]
+            </button>
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(16, 185, 129, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="expandGraphFromNode('${escapeHtml(nodeId)}', '${escapeHtml(pivotType)}', '${escapeHtml(pivotValue)}')">
+                [EXPAND GRAPH FROM NODE (+)]
+            </button>
+        `;
+    } else if (canDirectPivot) {
+        actionButtonsHtml += `
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #04131f; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(56, 189, 248, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="pivotOnEntity('${escapeHtml(pivotType)}', '${escapeHtml(pivotValue)}')">
+                [PIVOT ON THIS ${escapeHtml(pivotType || 'ENTITY')}]
+            </button>
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(16, 185, 129, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="expandGraphFromNode('${escapeHtml(nodeId)}', '${escapeHtml(pivotType)}', '${escapeHtml(pivotValue)}')">
+                [EXPAND GRAPH FROM NODE (+)]
+            </button>
+        `;
+    } else {
+        actionButtonsHtml += `
+            <div style="font-size: 0.72rem; color: #94a3b8; font-style: italic; line-height: 1.4;">
+                Descriptive context artifact. Lateral connections can be revealed via multi-hop graph expansion below.
+            </div>
+            <button type="button" class="btn-primary w-full py-2 px-3 text-xs mono" style="background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 0 14px rgba(16, 185, 129, 0.35); border: none; cursor: pointer; border-radius: 4px;" onclick="expandGraphFromNode('${escapeHtml(nodeId)}', '${escapeHtml(pivotType || 'SEMANTIC')}', '${escapeHtml(pivotValue || node.label)}')">
+                [EXPAND GRAPH FROM NODE (+)]
+            </button>
+        `;
+    }
+
+    actionButtonsHtml += `</div>`;
+    html += actionButtonsHtml;
 
     bodyEl.innerHTML = html;
     drawer.style.display = "flex";
@@ -5774,11 +8553,38 @@ function renderNodeInspector(nodeId) {
 function pivotOnEntity(pivotType, pivotValue) {
     if (!pivotValue) return;
     const cleanVal = pivotValue.trim();
-    showToast(`Pivoting investigation on ${pivotType}: ${cleanVal}`, "info");
 
-    const searchInput = document.getElementById("search-input");
-    if (searchInput) {
-        searchInput.value = cleanVal;
+    if (pivotType === "LOCATION") {
+        const geoTabBtn = document.querySelector('[data-tab="tab-geo"]') || document.querySelector('[data-tab="tab-map"]');
+        if (geoTabBtn) {
+            geoTabBtn.click();
+            showToast(`Switched to Geolocation tab: ${cleanVal}`, "info");
+        } else {
+            showToast(`Geospatial location record: ${cleanVal}`, "info");
+        }
+        return;
+    }
+
+    if (pivotType === "LEAK" || pivotType === "BREACH") {
+        const leaksTabBtn = document.querySelector('[data-tab="tab-leaks"]') || document.querySelector('[data-tab="tab-disclosures"]');
+        if (leaksTabBtn) {
+            leaksTabBtn.click();
+            showToast(`Inspecting incident in Breach Disclosures: ${cleanVal}`, "info");
+        } else {
+            showToast(`Breach incident: ${cleanVal}`, "info");
+        }
+        return;
+    }
+
+    if (pivotType === "ORGANIZATION" || pivotType === "COMPANY") {
+        showToast(`Correlating organization intelligence for: ${cleanVal}`, "info");
+        if (cleanVal.includes(".") && !cleanVal.includes(" ")) {
+            executeDomainRecon(cleanVal);
+        } else {
+            const compQuery = `"${cleanVal}" (breach OR email OR domain OR leak)`;
+            window.open(`https://duckduckgo.com/?q=${encodeURIComponent(compQuery)}`, "_blank");
+        }
+        return;
     }
 
     if (pivotType === "HASH") {
@@ -5823,7 +8629,42 @@ function pivotOnEntity(pivotType, pivotValue) {
         return;
     }
 
-    // Default: EMAIL, USERNAME, or IDENTITY
+    // Email extraction / validation
+    const emailMatch = cleanVal.match(/[\w\.-]+@[\w\.-]+\.\w+/);
+    if (emailMatch) {
+        const targetEmail = emailMatch[0].toLowerCase();
+        showToast(`Pivoting investigation on Email: ${targetEmail}`, "info");
+        const searchInput = document.getElementById("search-input");
+        if (searchInput) searchInput.value = targetEmail;
+        currentEmail = targetEmail;
+        executeInvestigation(currentEmail);
+        return;
+    }
+
+    // Username / Handle / Name
+    if (pivotType === "USERNAME" || pivotType === "HANDLE" || pivotType === "NAME") {
+        const cleanTarget = cleanVal.replace(/^(@|GitHub:\s*@?|Twitter:\s*@?|Platform:\s*|Name:\s*|Full Name:\s*)/i, '').trim();
+        if (cleanTarget) {
+            showToast(`Pivoting investigation on ${pivotType}: ${cleanTarget}`, "info");
+            const searchInput = document.getElementById("search-input");
+            if (searchInput) searchInput.value = cleanTarget;
+            currentEmail = cleanTarget;
+            executeInvestigation(currentEmail);
+            return;
+        }
+    }
+
+    // Safety fallback for arbitrary sentences or notes:
+    if (cleanVal.length > 30 || cleanVal.includes(":") || cleanVal.includes("/") || cleanVal.includes(" at ")) {
+        showToast("This entity is a descriptive note/attribute, not a direct identity anchor. Expanding graph connections...", "info");
+        expandGraphFromNode("selected_node", pivotType || "SEMANTIC", cleanVal);
+        return;
+    }
+
+    // Direct clean identity query
+    showToast(`Pivoting investigation on: ${cleanVal}`, "info");
+    const searchInput = document.getElementById("search-input");
+    if (searchInput) searchInput.value = cleanVal;
     currentEmail = cleanVal;
     executeInvestigation(currentEmail);
 }
@@ -6333,6 +9174,7 @@ window.toggleAICopilotDrawer = function () {
         if (badge) badge.style.display = "none";
     }
 };
+window.toggleCopilotDrawer = window.toggleAICopilotDrawer;
 
 window.openAICopilotDrawer = function () {
     playSound("click");
@@ -6525,6 +9367,39 @@ function renderAIDossierContent(dossier, scanData) {
                 ${escapeHtml(dossier.executive_summary || 'No summary available.')}
             </div>
         </div>
+
+        <!-- 1b. Cardinal Autonomous Cognitive Thought Stream -->
+        ${scanData && scanData.cardinal_thoughts && scanData.cardinal_thoughts.length > 0 ? `
+            <div class="evidence-card" style="border-left: 3px solid #f59e0b; margin-bottom: 12px; background: rgba(245, 158, 11, 0.04);">
+                <div class="evidence-title flex items-center justify-between" style="color: #fbbf24; font-size: 0.88rem; margin-bottom: 8px;">
+                    <span class="flex items-center gap-1.5 font-bold">
+                        <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        CARDINAL AUTONOMOUS COGNITIVE TRACE
+                    </span>
+                    <span class="badge-pill mono" style="font-size: 0.65rem; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.1);">
+                        ${scanData.cardinal_thoughts.length} DECISION HOPS
+                    </span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    ${scanData.cardinal_thoughts.map(th => `
+                        <div style="padding: 8px 10px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.73rem;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                                <span style="font-weight: 700; color: ${th.phase === 'SYNTHESIS' ? '#10b981' : (th.phase === 'PIVOT_STRIKE' ? '#38bdf8' : '#fbbf24')};">
+                                    [${escapeHtml(th.phase)}] ${escapeHtml(th.title)}
+                                </span>
+                                <span style="color: #94a3b8; font-size: 0.68rem;">+${th.elapsed_s}s</span>
+                            </div>
+                            <div style="color: #e2e8f0; line-height: 1.45;">${escapeHtml(th.thought)}</div>
+                            ${th.action_dispatched ? `
+                                <div style="margin-top: 5px; color: #38bdf8; font-size: 0.68rem; font-weight: 600;">
+                                    ➔ <strong>Action:</strong> ${escapeHtml(th.action_dispatched)}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        ` : ''}
 
         <!-- 2. Candidate Persona Attribution -->
         <div class="evidence-card" style="border-left: 3px solid #38bdf8; margin-bottom: 12px;">
@@ -7460,13 +10335,23 @@ function renderImageCorrelationTab(data) {
             const platform = escapeHtml(img.platform || "Web Asset");
             const label = escapeHtml(img.label || img.source || "Target Avatar");
             const badge = escapeHtml(img.badge || "PUBLIC");
+            const isPrimary = Boolean(img.is_primary || (emp && emp.avatar_seed && emp.avatar_seed === imgUrl));
+            const classification = img.classification || (isPrimary ? "REAL_HUMAN_PORTRAIT" : "CARTOON_OR_AVATAR");
+            const classLabel = classification === "REAL_HUMAN_PORTRAIT" ? "REAL HUMAN PORTRAIT" : (classification === "CARTOON_OR_AVATAR" ? "CARTOON / AVATAR" : "GRAPHIC / LOGO");
+            const classBg = classification === "REAL_HUMAN_PORTRAIT" ? "rgba(16, 185, 129, 0.15)" : "rgba(148, 163, 184, 0.15)";
+            const classColor = classification === "REAL_HUMAN_PORTRAIT" ? "#34d399" : "#94a3b8";
+            const classBorder = classification === "REAL_HUMAN_PORTRAIT" ? "rgba(16, 185, 129, 0.4)" : "rgba(148, 163, 184, 0.3)";
 
             html += `
-                <div class="evidence-card" style="margin: 0; padding: 12px; background: var(--c-elevated); border: 1px solid var(--b-hairline); display: flex; flex-direction: column; justify-content: space-between;">
+                <div class="evidence-card" style="margin: 0; padding: 12px; background: var(--c-elevated); border: 1px solid ${isPrimary ? 'rgba(16, 185, 129, 0.4)' : 'var(--b-hairline)'}; display: flex; flex-direction: column; justify-content: space-between;">
                     <div>
-                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                            <span class="mono font-bold text-xs" style="color: #c084fc;">${platform}</span>
-                            <span class="mono text-[10px] px-1.5 py-0.5 rounded" style="background: var(--c-surface); border: 1px solid var(--b-hairline); color: var(--t-secondary);">${badge}</span>
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 4px;">
+                            <span class="mono font-bold text-xs" style="color: ${isPrimary ? '#34d399' : '#c084fc'};">${platform}</span>
+                            <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+                                ${isPrimary ? `<span class="mono text-[9px] px-1.5 py-0.5 rounded font-bold" style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #34d399;">PRIMARY FACE</span>` : ''}
+                                <span class="mono text-[9px] px-1.5 py-0.5 rounded" style="background: ${classBg}; border: 1px solid ${classBorder}; color: ${classColor};">${classLabel}</span>
+                                <button type="button" class="pivot-provenance-btn mono" onclick="openProvenanceConsole('step_6_visual')" title="Inspect AI Face Arbitration in Execution Console">Step 6: Face Arbitration &rarr;</button>
+                            </div>
                         </div>
                         <div style="text-align: center; margin-bottom: 10px; background: var(--c-canvas); border-radius: 6px; padding: 8px; border: 1px solid var(--b-hairline);">
                             <img src="${safeUrl}" alt="${platform}" style="max-height: 140px; max-width: 100%; border-radius: 4px; object-fit: contain; margin: 0 auto; display: block;" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'80\\' height=\\'80\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'%2364748b\\' stroke-width=\\'1.5\\'%3E%3Crect x=\\'3\\' y=\\'3\\' width=\\'18\\' height=\\'18\\' rx=\\'2\\'/%3E%3Ccircle cx=\\'8.5\\' cy=\\'8.5\\' r=\\'1.5\\'/%3E%3Cpolyline points=\\'21 15 16 10 5 21\\'/%3E%3C/svg%3E';">
@@ -7474,8 +10359,18 @@ function renderImageCorrelationTab(data) {
                         <div class="mono text-xs font-semibold text-zinc-300 dark:text-zinc-200" style="margin-bottom: 4px; word-break: break-all;">
                             ${label}
                         </div>
+                        ${img.reasoning ? `
+                            <div class="mono text-[10px] text-zinc-400 mb-2 p-1.5 rounded" style="background: var(--c-surface); border: 1px solid var(--b-hairline); line-height: 1.35;">
+                                <span class="text-zinc-500 font-bold">AI Analysis:</span> ${escapeHtml(img.reasoning)}
+                            </div>
+                        ` : ''}
                         <div class="mono text-[11px] text-zinc-500 mb-3" style="word-break: break-all;">
-                            ${escapeHtml(img.profile_url || imgUrl)}
+                            ${img.profile_url && img.profile_url.startsWith('http') ?
+                    `<a href="${escapeHtml(img.profile_url)}" target="_blank" rel="noopener noreferrer" style="color: #818cf8; text-decoration: underline;">
+                                    ${escapeHtml(img.profile_url)} &nearr;
+                                </a>` :
+                    escapeHtml(img.profile_url || imgUrl)
+                }
                         </div>
                     </div>
 
@@ -7866,72 +10761,132 @@ window.handleSessionsModalBackdropClick = function (event) {
 };
 
 window.refreshSessionsModalUI = async function () {
-    const statusDot = document.getElementById("vault-status-dot");
-    const statusEl = document.getElementById("vault-li-status");
-    const accountBox = document.getElementById("vault-li-account-box");
-    const nameEl = document.getElementById("vault-li-account-name");
-    const descEl = document.getElementById("vault-status-description");
+    const liDot = document.getElementById("vault-li-dot");
+    const liStatus = document.getElementById("vault-li-status");
+    const liAccountBox = document.getElementById("vault-li-account-box");
+    const liName = document.getElementById("vault-li-account-name");
+
+    const fbDot = document.getElementById("vault-fb-dot");
+    const fbStatus = document.getElementById("vault-fb-status");
+    const fbAccountBox = document.getElementById("vault-fb-account-box");
+    const fbUserId = document.getElementById("vault-fb-user-id");
+
     const launchBtnText = document.getElementById("btn-launch-text");
 
-    if (statusEl) {
-        statusEl.innerText = "CHECKING STATUS...";
-        statusEl.style.color = "#94a3b8";
-    }
+    if (liStatus) liStatus.innerText = "CHECKING...";
+    if (fbStatus) fbStatus.innerText = "CHECKING...";
 
     try {
         const res = await fetch("/api/sessions/status");
         const data = await res.json();
 
         const isLiValid = !!(data.linkedin && data.linkedin.valid);
-        const accountName = data.linkedin?.account_name || "LinkedIn Member";
+        const accountName = data.linkedin?.account_name || "Active Member";
+
+        const isFbValid = !!(data.facebook && data.facebook.valid);
+        const fbUser = data.facebook?.c_user || "Active";
+
+        // 1. Update LinkedIn Card
+        const isLiConfigured = !!(data.linkedin && data.linkedin.configured);
+        const liStatusText = data.linkedin?.status;
 
         if (isLiValid) {
-            if (statusDot) {
-                statusDot.style.background = "#10b981";
-                statusDot.style.boxShadow = "0 0 10px #10b981";
+            if (liDot) {
+                liDot.style.background = "#10b981";
+                liDot.style.boxShadow = "0 0 8px #10b981";
             }
-            if (statusEl) {
-                statusEl.innerText = "ACTIVE & CONNECTED";
-                statusEl.style.color = "#34d399";
+            if (liStatus) {
+                liStatus.innerText = "ACTIVE & CONNECTED";
+                liStatus.style.color = "#34d399";
             }
-            if (accountBox) {
-                accountBox.style.display = "block";
-                if (nameEl) nameEl.innerText = accountName;
+            if (liAccountBox) {
+                liAccountBox.style.display = "block";
+                if (liName) liName.innerText = accountName;
             }
-            if (descEl) {
-                descEl.innerText = "Your desktop browser session is securely connected and active. LinkedIn OSINT queries will use your session safely.";
+        } else if (isLiConfigured) {
+            if (liDot) {
+                liDot.style.background = "#ef4444";
+                liDot.style.boxShadow = "0 0 8px #ef4444";
             }
-            if (launchBtnText) {
-                launchBtnText.innerText = "🔄 Re-authenticate / Refresh Session";
+            if (liStatus) {
+                liStatus.innerText = (liStatusText === "expired") ? "! EXPIRED / INVALID" : "! PROBLEM";
+                liStatus.style.color = "#f87171";
             }
-            updateBrowserHeaderStatus({ valid: true, account_name: accountName });
+            if (liAccountBox) liAccountBox.style.display = "none";
         } else {
-            if (statusDot) {
-                statusDot.style.background = "#64748b";
-                statusDot.style.boxShadow = "none";
+            if (liDot) {
+                liDot.style.background = "#64748b";
+                liDot.style.boxShadow = "none";
             }
-            if (statusEl) {
-                statusEl.innerText = "NOT CONNECTED";
-                statusEl.style.color = "#94a3b8";
+            if (liStatus) {
+                liStatus.innerText = "NOT CONNECTED";
+                liStatus.style.color = "#94a3b8";
             }
-            if (accountBox) {
-                accountBox.style.display = "none";
-            }
-            if (descEl) {
-                descEl.innerText = "Connect your desktop browser once to enable private LinkedIn profile intelligence without getting flagged.";
-            }
-            if (launchBtnText) {
-                launchBtnText.innerText = "🚀 Launch Browser & Connect";
-            }
-            updateBrowserHeaderStatus({ valid: false });
+            if (liAccountBox) liAccountBox.style.display = "none";
         }
+
+        // 2. Update Facebook Card
+        const isFbConfigured = !!(data.facebook && data.facebook.configured);
+        const fbStatusText = data.facebook?.status;
+        const fbAccountName = data.facebook?.account_name || fbUser;
+
+        if (isFbValid) {
+            if (fbDot) {
+                fbDot.style.background = "#10b981";
+                fbDot.style.boxShadow = "0 0 8px #10b981";
+            }
+            if (fbStatus) {
+                fbStatus.innerText = "ACTIVE & CONNECTED";
+                fbStatus.style.color = "#34d399";
+            }
+            if (fbAccountBox) {
+                fbAccountBox.style.display = "block";
+                if (fbUserId) fbUserId.innerText = fbAccountName;
+            }
+        } else if (isFbConfigured) {
+            if (fbDot) {
+                fbDot.style.background = "#ef4444";
+                fbDot.style.boxShadow = "0 0 8px #ef4444";
+            }
+            if (fbStatus) {
+                fbStatus.innerText = (fbStatusText === "expired") ? "! EXPIRED / REJECTED" : "! REJECTED";
+                fbStatus.style.color = "#f87171";
+            }
+            if (fbAccountBox) fbAccountBox.style.display = "none";
+        } else {
+            if (fbDot) {
+                fbDot.style.background = "#64748b";
+                fbDot.style.boxShadow = "none";
+            }
+            if (fbStatus) {
+                fbStatus.innerText = "NOT CONNECTED";
+                fbStatus.style.color = "#94a3b8";
+            }
+            if (fbAccountBox) fbAccountBox.style.display = "none";
+        }
+
+        // 3. Update Launch Button Label
+        if (launchBtnText) {
+            if (isLiValid && isFbValid) {
+                launchBtnText.innerText = "Re-authenticate All (LinkedIn + Facebook)";
+            } else if (isLiValid) {
+                launchBtnText.innerText = "Launch Browser to Connect Facebook";
+            } else if (isFbValid) {
+                launchBtnText.innerText = "Launch Browser to Connect LinkedIn";
+            } else {
+                launchBtnText.innerText = "Launch Unified Session (LinkedIn + Facebook)";
+            }
+        }
+
+        updateBrowserHeaderStatus({
+            linkedin: isLiValid,
+            facebook: isFbValid,
+            account_name: accountName
+        });
     } catch (e) {
         console.warn("Could not check session status:", e);
-        if (statusEl) {
-            statusEl.innerText = "STATUS CHECK FAILED";
-            statusEl.style.color = "#f87171";
-        }
-        updateBrowserHeaderStatus({ valid: false });
+        if (liStatus) liStatus.innerText = "CHECK FAILED";
+        if (fbStatus) fbStatus.innerText = "CHECK FAILED";
     }
 };
 
@@ -7972,6 +10927,108 @@ window.handleCookieInputAutoDetect = function (el) {
             jsInput.value = jsessionid;
             setVaultFeedback("✓ Auto-extracted li_at and JSESSIONID from pasted cookie header!", true);
         }
+    }
+};
+
+window.handleFacebookCookieInputAutoDetect = function (el) {
+    if (!el || !el.value) return;
+    const val = el.value.trim();
+
+    if (val.includes("c_user=") || val.includes("xs=") || (val.includes(";") && val.includes("="))) {
+        let c_user = "";
+        let xs = "";
+
+        const mUser = val.match(/(?:^|;\s*|\s+)c_user=([0-9]+)/);
+        if (mUser) c_user = mUser[1].trim();
+
+        const mXs = val.match(/(?:^|;\s*|\s+)xs=([^;,\s]+)/);
+        if (mXs) xs = mXs[1].replace(/^["']|["']$/g, "").trim();
+
+        const userInput = document.getElementById("vault-fb-user-input");
+        const xsInput = document.getElementById("vault-fb-xs-input");
+
+        if (c_user && userInput) userInput.value = c_user;
+        if (xs && xsInput) xsInput.value = xs;
+
+        if (c_user || xs) {
+            setVaultFeedback("✓ Auto-extracted Facebook c_user and xs from pasted cookie string!", true);
+        }
+    }
+};
+
+window.checkFacebookCookieLive = async function (showAlerts = true) {
+    const statusEl = document.getElementById("vault-fb-status");
+    const dotEl = document.getElementById("vault-fb-dot");
+    const accountBox = document.getElementById("vault-fb-account-box");
+    const userEl = document.getElementById("vault-fb-user-id");
+    const btnCheck = document.getElementById("btn-vault-check-fb");
+    const inputUser = document.getElementById("vault-fb-user-input");
+    const inputXs = document.getElementById("vault-fb-xs-input");
+
+    const userVal = inputUser ? inputUser.value.trim() : "";
+    const xsVal = inputXs ? inputXs.value.trim() : "";
+
+    if (btnCheck) btnCheck.innerText = "Checking...";
+    if (statusEl) {
+        statusEl.innerText = "TESTING LIVE META SESSION...";
+        statusEl.style.color = "#fbbf24";
+    }
+    setVaultFeedback("Connecting to Facebook / Meta endpoint...", true);
+
+    try {
+        const body = {};
+        if (userVal) body.c_user = userVal;
+        if (xsVal) body.xs = xsVal;
+
+        const res = await fetch("/api/sessions/verify_facebook", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+
+        if (data.valid) {
+            if (dotEl) {
+                dotEl.style.background = "#10b981";
+                dotEl.style.boxShadow = "0 0 8px #10b981";
+            }
+            if (statusEl) {
+                statusEl.innerText = "VALID & AUTHENTICATED";
+                statusEl.style.color = "#34d399";
+            }
+            if (accountBox) {
+                accountBox.style.display = "block";
+                if (userEl) userEl.innerText = data.account_name || data.c_user || "Active";
+            }
+            setVaultFeedback(`Facebook Session Active & Verified: ${data.account_name || data.c_user}`, true);
+            if (showAlerts && typeof showToast === "function") {
+                showToast(`Facebook Session Active: ${data.account_name || data.c_user}`, "success");
+            }
+        } else {
+            if (dotEl) {
+                dotEl.style.background = data.configured ? "#ef4444" : "#64748b";
+                dotEl.style.boxShadow = data.configured ? "0 0 8px #ef4444" : "none";
+            }
+            if (statusEl) {
+                statusEl.innerText = data.configured ? "! EXPIRED / REJECTED" : "! NOT CONFIGURED";
+                statusEl.style.color = "#f87171";
+            }
+            if (accountBox) accountBox.style.display = "none";
+            setVaultFeedback("! " + (data.message || "Facebook cookie verification failed."), false);
+            if (showAlerts && typeof showToast === "function") {
+                showToast(data.message || "Facebook session check failed.", "error");
+            }
+        }
+        await updateBrowserHeaderStatus();
+    } catch (e) {
+        console.error("Live Facebook verify error:", e);
+        if (statusEl) {
+            statusEl.innerText = "! CHECK FAILED";
+            statusEl.style.color = "#f87171";
+        }
+        setVaultFeedback("! Network check failed: " + e.message, false);
+    } finally {
+        if (btnCheck) btnCheck.innerText = "Check Live";
     }
 };
 
@@ -8018,14 +11075,13 @@ window.checkLinkedInCookieLive = async function (showAlerts = true) {
             if (accountBox) {
                 accountBox.style.display = "block";
                 if (nameEl) nameEl.innerText = data.account_name || "LinkedIn Member";
-                if (subEl) subEl.innerText = (data.headline ? `${data.headline} • ` : "") + "Voyager API Authenticated";
+                if (subEl) subEl.innerText = (data.headline ? `${data.headline} - ` : "") + "Voyager API Authenticated";
             }
-            // Update top header cookie logo to GREEN
-            updateCookieHeaderStatus({ valid: true, account_name: data.account_name });
-            setVaultFeedback(`✓ Session Active & Verified: ${data.account_name}`, true);
+            setVaultFeedback(`Session Active & Verified: ${data.account_name || "Active Member"}`, true);
             if (showAlerts && typeof showToast === "function") {
-                showToast(`LinkedIn Session Active: ${data.account_name}`, "success");
+                showToast(`LinkedIn Session Active: ${data.account_name || "Active Member"}`, "success");
             }
+            await refreshSessionsModalUI();
         } else {
             if (statusEl) {
                 statusEl.innerText = data.configured ? "! EXPIRED / INVALID" : "! NOT CONFIGURED";
@@ -8034,12 +11090,11 @@ window.checkLinkedInCookieLive = async function (showAlerts = true) {
                 statusEl.style.borderColor = "#ef4444";
             }
             if (accountBox) accountBox.style.display = "none";
-            // Update top header cookie logo to RED with '!'
-            updateCookieHeaderStatus({ valid: false });
             setVaultFeedback("! " + (data.message || "LinkedIn cookie check failed."), false);
             if (showAlerts && typeof showToast === "function") {
                 showToast(data.message || "LinkedIn cookie check failed.", "error");
             }
+            await refreshSessionsModalUI();
         }
     } catch (e) {
         console.error("Live LinkedIn verify error:", e);
@@ -8092,7 +11147,7 @@ window.saveLinkedInCookieFromModal = async function () {
             const isVal = data.verification?.valid;
             updateCookieHeaderStatus({ valid: isVal, account_name: data.verification?.account_name });
             const verMsg = data.verification?.message || "Saved to .env";
-            setVaultFeedback(`✓ LinkedIn session saved to .env! (${verMsg})`, isVal);
+            setVaultFeedback(`LinkedIn session saved to .env! (${verMsg})`, isVal);
             if (typeof showToast === "function") {
                 showToast("Cookie saved: " + verMsg, isVal ? "success" : "warning");
             }
@@ -8110,19 +11165,79 @@ window.saveLinkedInCookieFromModal = async function () {
     }
 };
 
+window.saveFacebookCookieFromModal = async function () {
+    const inputUser = document.getElementById("vault-fb-user-input");
+    const inputXs = document.getElementById("vault-fb-xs-input");
+    const userVal = inputUser ? inputUser.value.trim() : "";
+    const xsVal = inputXs ? inputXs.value.trim() : "";
+
+    if (!userVal || !xsVal) {
+        setVaultFeedback("! Please provide both your Facebook c_user (Numeric ID) and xs token.", false);
+        if (typeof showToast === "function") {
+            showToast("Please provide both Facebook c_user and xs token.", "warning");
+        }
+        return;
+    }
+
+    const btnSave = document.getElementById("btn-vault-save-fb");
+    if (btnSave) btnSave.innerText = "Saving & Verifying...";
+    setVaultFeedback("Saving Facebook credentials to .env and validating live...", true);
+
+    try {
+        const res = await fetch("/api/sessions/save_facebook", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ c_user: userVal, xs: xsVal })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            if (inputUser) inputUser.value = "";
+            if (inputXs) inputXs.value = "";
+            await refreshSessionsModalUI();
+
+            const isVal = data.verification?.valid;
+            const verMsg = data.verification?.message || "Saved to .env";
+            if (isVal) {
+                setVaultFeedback(`Facebook session saved & verified active! (${verMsg})`, true);
+                if (typeof showToast === "function") {
+                    showToast(`Facebook session saved & active!`, "success");
+                }
+            } else {
+                setVaultFeedback(`! Saved to .env, but session was REJECTED by Meta: ${verMsg}`, false);
+                if (typeof showToast === "function") {
+                    showToast(`Saved to .env, but session is invalid/rejected.`, "warning");
+                }
+            }
+        } else {
+            setVaultFeedback("! " + (data.message || "Could not save Facebook credentials."), false);
+            if (typeof showToast === "function") {
+                showToast(data.message || "Could not save Facebook credentials.", "error");
+            }
+        }
+    } catch (e) {
+        console.error("Error saving Facebook cookie:", e);
+        setVaultFeedback("! Error: " + e.message, false);
+    } finally {
+        if (btnSave) btnSave.innerText = "Save to .env";
+    }
+};
+
 window.updateBrowserHeaderStatus = async function (customStatus) {
     const btn = document.getElementById("btn-header-connect-browser");
     const text = document.getElementById("browser-btn-text");
     const dot = document.getElementById("browser-status-dot");
 
-    let isGood = false;
+    let isLiGood = false;
+    let isFbGood = false;
     let accountName = null;
 
     if (customStatus !== undefined && customStatus !== null) {
         if (typeof customStatus === "boolean") {
-            isGood = customStatus;
+            isLiGood = customStatus;
         } else if (typeof customStatus === "object") {
-            isGood = !!customStatus.valid || customStatus.overall_status === "good";
+            isLiGood = !!customStatus.linkedin;
+            isFbGood = !!customStatus.facebook;
             accountName = customStatus.account_name;
         }
     } else {
@@ -8130,7 +11245,8 @@ window.updateBrowserHeaderStatus = async function (customStatus) {
             const res = await fetch("/api/sessions/status");
             if (res.ok) {
                 const data = await res.json();
-                isGood = !!(data.linkedin && data.linkedin.valid);
+                isLiGood = !!(data.linkedin && data.linkedin.valid);
+                isFbGood = !!(data.facebook && data.facebook.valid);
                 accountName = data.linkedin?.account_name;
             }
         } catch (e) {
@@ -8140,7 +11256,7 @@ window.updateBrowserHeaderStatus = async function (customStatus) {
 
     if (!btn) return;
 
-    if (isGood) {
+    if (isLiGood && isFbGood) {
         btn.style.borderColor = "rgba(16, 185, 129, 0.4)";
         btn.style.color = "#34d399";
         btn.style.background = "rgba(16, 185, 129, 0.1)";
@@ -8150,9 +11266,36 @@ window.updateBrowserHeaderStatus = async function (customStatus) {
             dot.style.boxShadow = "0 0 8px #10b981";
         }
         if (text) {
-            text.innerText = accountName ? ("CONNECTED: " + accountName.split(" ")[0].toUpperCase()) : "BROWSER: CONNECTED";
+            text.innerText = "ALL SESSIONS: ACTIVE";
         }
-        btn.title = accountName ? `LinkedIn Session Active: ${accountName}` : "LinkedIn Browser Session Connected & Active";
+        btn.title = "LinkedIn and Facebook Sessions Connected & Active";
+    } else if (isFbGood && !isLiGood) {
+        btn.style.borderColor = "rgba(245, 158, 11, 0.4)";
+        btn.style.color = "#fbbf24";
+        btn.style.background = "rgba(245, 158, 11, 0.1)";
+        btn.classList.remove("status-good");
+        if (dot) {
+            dot.style.background = "#f59e0b";
+            dot.style.boxShadow = "0 0 8px #f59e0b";
+        }
+        if (text) {
+            text.innerText = "FB: ACTIVE | LI: DISCONNECTED";
+        }
+        btn.title = "Facebook Active. LinkedIn is Disconnected or Expired.";
+    } else if (isLiGood && !isFbGood) {
+        btn.style.borderColor = "rgba(245, 158, 11, 0.4)";
+        btn.style.color = "#fbbf24";
+        btn.style.background = "rgba(245, 158, 11, 0.1)";
+        btn.classList.remove("status-good");
+        if (dot) {
+            dot.style.background = "#f59e0b";
+            dot.style.boxShadow = "0 0 8px #f59e0b";
+        }
+        if (text) {
+            const shortName = accountName ? accountName.split(" ")[0].toUpperCase() : "ACTIVE";
+            text.innerText = `LI: ${shortName} | FB: DISCONNECTED`;
+        }
+        btn.title = "LinkedIn Active. Facebook is Disconnected.";
     } else {
         btn.style.borderColor = "rgba(56, 189, 248, 0.4)";
         btn.style.color = "#38bdf8";
@@ -8165,7 +11308,7 @@ window.updateBrowserHeaderStatus = async function (customStatus) {
         if (text) {
             text.innerText = "CONNECT BROWSER";
         }
-        btn.title = "Connect Local Desktop Browser Session for LinkedIn Intelligence";
+        btn.title = "Connect Local Desktop Browser Session for LinkedIn & Facebook Intelligence";
     }
 };
 
@@ -8173,6 +11316,8 @@ window.updateBrowserHeaderStatus = async function (customStatus) {
 window.updateCookieHeaderStatus = window.updateBrowserHeaderStatus;
 window.updateSessionsHeaderStatusBadge = window.updateBrowserHeaderStatus;
 window.updateSessionsHeaderStatus = window.updateBrowserHeaderStatus;
+window.openSessionsVaultModal = function () { return window.openSessionsModal(); };
+window.closeSessionsVaultModal = function () { return window.closeSessionsModal(); };
 
 window.openSessionsModal = async function () {
     console.log("[Browser Session] Opening connect browser modal...");
@@ -8197,8 +11342,8 @@ window.handleSessionsModalBackdropClick = function (event) {
     }
 };
 
-window.connectDesktopBrowser = async function () {
-    console.log("[Browser Connect] Launching dedicated browser session...");
+window.connectDesktopBrowser = async function (target = "all") {
+    console.log(`[Browser Connect] Launching dedicated browser session in mode: ${target}...`);
     const modal = document.getElementById("sessions-vault-modal");
     if (!modal || modal.style.display === "none") {
         window.openSessionsModal();
@@ -8208,81 +11353,109 @@ window.connectDesktopBrowser = async function () {
     const launchBtn = document.getElementById("btn-vault-launch-browser");
     const launchBtnText = document.getElementById("btn-launch-text");
     const headerBtnText = document.getElementById("browser-btn-text");
+    const reauthLiBtn = document.getElementById("btn-vault-reauth-li");
+    const reauthFbBtn = document.getElementById("btn-vault-reauth-fb");
 
-    if (launchBtn) {
-        launchBtn.disabled = true;
+    if (launchBtn) launchBtn.disabled = true;
+    if (launchBtnText) launchBtnText.innerText = "Opening Browser Window...";
+    if (headerBtnText) headerBtnText.innerText = "LAUNCHING...";
+
+    if (target === "linkedin" && reauthLiBtn) {
+        reauthLiBtn.disabled = true;
+        reauthLiBtn.innerHTML = "<span>⏳</span> Opening...";
+    } else if (target === "facebook" && reauthFbBtn) {
+        reauthFbBtn.disabled = true;
+        reauthFbBtn.innerHTML = "<span>⏳</span> Opening...";
     }
-    if (launchBtnText) {
-        launchBtnText.innerText = "Opening Browser Window...";
-    }
-    if (headerBtnText) {
-        headerBtnText.innerText = "LAUNCHING...";
-    }
+
+    const resetButtons = () => {
+        if (launchBtn) launchBtn.disabled = false;
+        if (launchBtnText) launchBtnText.innerText = "Launch Browser & Connect";
+        if (headerBtnText) headerBtnText.innerText = "CONNECT BROWSER";
+        if (reauthLiBtn) {
+            reauthLiBtn.disabled = false;
+            reauthLiBtn.innerHTML = "<span>🔄</span> Re-authenticate";
+        }
+        if (reauthFbBtn) {
+            reauthFbBtn.disabled = false;
+            reauthFbBtn.innerHTML = "<span>🔄</span> Re-authenticate";
+        }
+    };
+
     if (feedback) {
         feedback.style.display = "block";
         feedback.style.background = "rgba(14, 165, 233, 0.15)";
         feedback.style.color = "#38bdf8";
         feedback.style.border = "1px solid #0284c7";
-        feedback.innerHTML = "<strong>Browser Window Opened:</strong> A secure browser window has opened on your desktop. Sign into LinkedIn (via Google or password). BreachSpillover will automatically capture your verified session.";
+        if (target === "facebook") {
+            feedback.innerHTML = "<strong>Facebook Browser Opened:</strong> Sign into Facebook in the desktop window. BreachSpillover will automatically capture your session tokens.";
+        } else if (target === "linkedin") {
+            feedback.innerHTML = "<strong>LinkedIn Browser Opened:</strong> Sign into LinkedIn in the desktop window. BreachSpillover will automatically capture your session tokens.";
+        } else {
+            feedback.innerHTML = "<strong>Browser Window Opened:</strong> Log into LinkedIn or Facebook. BreachSpillover will automatically capture your session tokens.";
+        }
     }
 
     try {
-        const resp = await fetch("/api/browser/launch", { method: "POST" });
+        const resp = await fetch("/api/browser/launch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ target: target })
+        });
         const data = await resp.json();
-        
+
         let checks = 0;
-        // Human-like polling: calm 4000ms interval (no request spamming)
         const pollInterval = setInterval(async () => {
             checks++;
             if (checks > 45) { // 3 minutes timeout
                 clearInterval(pollInterval);
-                if (launchBtn) {
-                    launchBtn.disabled = false;
-                }
-                if (launchBtnText) {
-                    launchBtnText.innerText = "🚀 Launch Browser & Connect";
-                }
-                if (headerBtnText) headerBtnText.innerText = "CONNECT BROWSER";
+                resetButtons();
                 if (feedback) {
-                    feedback.innerHTML = "<strong>Timed Out:</strong> Login detection timed out. You can click 'Launch Browser & Connect' to try again.";
+                    feedback.innerHTML = "<strong>Timed Out:</strong> Login detection timed out. Click Re-authenticate to try again.";
                 }
                 return;
             }
             try {
                 const stResp = await fetch("/api/sessions/status");
                 const stData = await stResp.json();
-                if (stData.linkedin && stData.linkedin.valid) {
+
+                const isLiValid = !!(stData.linkedin && stData.linkedin.valid);
+                const isFbValid = !!(stData.facebook && stData.facebook.valid);
+
+                let matched = false;
+                if (target === "linkedin") {
+                    matched = isLiValid;
+                } else if (target === "facebook") {
+                    matched = isFbValid;
+                } else if (target === "all") {
+                    matched = (isLiValid && isFbValid);
+                }
+
+                if (matched) {
                     clearInterval(pollInterval);
-                    const acctName = escapeHtml(stData.linkedin.account_name || 'LinkedIn Member');
+                    const tokens = [];
+                    if (isLiValid) tokens.push("LinkedIn");
+                    if (isFbValid) tokens.push("Facebook");
+
                     if (feedback) {
                         feedback.style.background = "rgba(16, 185, 129, 0.15)";
                         feedback.style.color = "#34d399";
                         feedback.style.border = "1px solid #10b981";
-                        feedback.innerHTML = `<strong>Connected &amp; Verified:</strong> Successfully authenticated as <strong>${acctName}</strong>!`;
+                        feedback.innerHTML = `<strong>Connected &amp; Verified:</strong> Successfully authenticated (${tokens.join(", ")})!`;
                     }
-                    if (launchBtn) {
-                        launchBtn.disabled = false;
-                    }
-                    if (launchBtnText) {
-                        launchBtnText.innerText = "✓ Connected Successfully!";
-                    }
-                    if (headerBtnText) {
-                        headerBtnText.innerText = "CONNECTED";
-                    }
-                    updateBrowserHeaderStatus({ valid: true, account_name: stData.linkedin.account_name });
+                    resetButtons();
+                    if (headerBtnText) headerBtnText.innerText = "CONNECTED";
+
+                    updateBrowserHeaderStatus({ linkedin: isLiValid, facebook: isFbValid });
                     if (typeof window.refreshSessionsModalUI === "function") {
                         await window.refreshSessionsModalUI();
                     }
                     if (typeof showToast === "function") {
-                        showToast(`LinkedIn browser session connected: ${stData.linkedin.account_name || 'Active'}`, "success");
+                        showToast(`Session connected: ${tokens.join(" + ")}`, "success");
                     }
-                    // Auto-close modal after 1.8 seconds so user sees visual confirmation
-                    setTimeout(() => {
-                        closeSessionsModal();
-                    }, 1800);
                 }
-            } catch (pe) {}
-        }, 4000);
+            } catch (pe) { }
+        }, 3000);
     } catch (e) {
         if (feedback) {
             feedback.style.display = "block";
@@ -8291,13 +11464,7 @@ window.connectDesktopBrowser = async function () {
             feedback.style.border = "1px solid #ef4444";
             feedback.innerHTML = `<strong>Error:</strong> Failed to launch browser (${e.message}). You can also run <code>python -m backend.interactive_login</code> in your terminal.`;
         }
-        if (launchBtn) {
-            launchBtn.disabled = false;
-        }
-        if (launchBtnText) {
-            launchBtnText.innerText = "🚀 Launch Browser & Connect";
-        }
-        if (headerBtnText) headerBtnText.innerText = "CONNECT BROWSER";
+        resetButtons();
     }
 };
 

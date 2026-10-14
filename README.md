@@ -41,34 +41,40 @@ BreachSpillover is a local-first security intelligence platform designed for sec
 - Corporate Registry Validation: Integrates Chamber of Commerce (KvK, Drimble) data to discover registered corporate headquarters, legal entity registrations, and business co-partners.
 - Portfolio and Personal Site Analysis: Analyzes personal portfolios (`.github.io`, `.wixsite.com`, custom domains) to extract verified biographic narratives and locations.
 
-### 6. Passive Infrastructure and DNS Reconnaissance
+### 6. AI Visual Identity & Multimodal Face Arbitration
+- Multi-Source Visual Extraction: Collects candidate visual footprints across Gravatar, GitHub, personal portfolio OpenGraph images, Pinterest, and verified LinkedIn profile photographs.
+- Perceptual Biometric Analysis: Evaluates aspect ratio, dimensions, continuous photographic color variance, and central facial skin-tone clustering in YCbCr chrominance space without heavy C++ runtime overhead.
+- Autonomous AI Reasoning: An LLM visual intelligence analyzer evaluates platform intent, provenance, and perceptual metrics to distinguish authentic human face photographs from cartoons, 2D avatars, or corporate logos.
+- Official Profile Picture Selection: Automatically designates the most plausible authentic photograph as the official primary avatar, persisting secondary visual footprints for reverse visual lookups (Google Lens, PimEyes, TinEye, Yandex).
+
+### 7. Passive Infrastructure and DNS Reconnaissance
 - DNS-over-HTTPS (DoH): Passive DNS queries through Cloudflare and Google DoH for A, AAAA, MX, TXT, NS, SOA, and CAA records.
 - Certificate Transparency (CT) Logs: Subdomain discovery via `crt.sh` to map organizational infrastructure and exposed endpoints (VPNs, SSO, mail gateways).
 - Email Security Posture: Evaluates SPF, DMARC, and DKIM policies (`p=reject`, `p=quarantine`, `p=none`) and identifies mail exchangers (Google Workspace, Microsoft 365, Proofpoint, Mimecast).
 
-### 7. Threat Dump and Paste Scraping
+### 8. Threat Dump and Paste Scraping
 - Searches active paste services and dump sites (Pastebin, JustPaste.it, Rentry) for target email mentions and leaked credentials.
 - Heuristic regex analysis detecting exposed API keys, bearer tokens, private keys, and credential formats.
 - Severity classification (Critical, High, Medium, Low) based on matched sensitive patterns.
 
-### 8. Interactive Attack Surface Graph
+### 9. Interactive Attack Surface Graph
 - Interactive visualization powered by Vis.js with physics simulation.
 - Provenance Hubs: Breaches, Git Repositories, Public Accounts, Telecom, and Geospatial records.
 - Concentric Orbit Mode (`[TIDY ORBITS]`): Organizes the graph into concentric geometric rings centered around the target identity to declutter complex graphs.
 - In-Place Multi-Hop Pivot Expansion: Traverses connected entities (breaches, credentials, domains, handles) directly on the active canvas.
 - Telemetry Inspector: Slide-in inspector detailing node metadata, raw hashes, and pivot triggers.
 
-### 9. Telecom Intelligence
+### 10. Telecom Intelligence
 - International phone number normalization and formatting (E.164 standard) via `libphonenumber`.
 - Carrier identification, line type validation (mobile, fixed-line, VOIP), and country-level routing telemetry.
 - Documentation Dummy Filter: Automatically filters out North American fictional 555-exchange numbers and sample documentation numbers from repository documents.
 
-### 10. Pluggable AI Narrative Engine and Copilot
+### 11. Pluggable AI Narrative Engine and Copilot
 - Automated synthesis of executive threat intelligence briefings using external LLM providers.
 - Direct integration with Groq Cloud (Meta Llama 3.3 70B) and Google Gemini (Gemini 1.5 Flash).
 - Interactive Copilot panel supporting ad-hoc investigative questions, attack blast radius analysis, and remediation checklists.
 
-### 11. Forensic Reporting and Exports
+### 12. Forensic Reporting and Exports
 - CSV Export: Flat spreadsheet ledger of breaches, stolen credentials, verified handles, and geospatial footprints with UTF-8 BOM encoding for Excel compatibility.
 - Microsoft Word (.doc) Export: Executive incident report with summary tables, risk classifications, and confidentiality disclaimers.
 - Defensive Exposure Report: Sanitized JSON and Markdown exports that allowlist non-sensitive exposure metrics for defensive remediation without exposing raw passwords or residential addresses.
@@ -86,7 +92,9 @@ BreachSpillover/
 │   ├── osint_scanner.py         # Multi-source intelligence orchestrator
 │   ├── ai_correlator.py         # Multi-token identity resolution and quarantine engine
 │   ├── linkedin_recon.py        # Candidate vanity slug generator and identity verification gate
-│   ├── browser_runner.py        # Playwright headless browser runner for authenticated scraping
+│   ├── facebook_recon.py        # Facebook profile derivation and authenticated media scraper
+│   ├── interactive_login.py     # Unified multi-tab browser session launcher and cookie interceptor
+│   ├── browser_runner.py        # Playwright browser runner for authenticated scraping
 │   ├── browser_bridge.py        # Local browser session detection and Google SSO bridge
 │   ├── unblocker_client.py      # Tier 1 proxy unblocker client with headless fallback
 │   ├── session_vault.py         # Persistent session management for authenticated browser contexts

@@ -30,6 +30,33 @@ COUNTRY_CODE_MAP = {
     "+33": {"iso": "FR", "country": "France", "currency": "EUR", "continent": "Europe"},
     "+31": {"iso": "NL", "country": "Netherlands", "currency": "EUR", "continent": "Europe"},
     "+358": {"iso": "FI", "country": "Finland", "currency": "EUR", "continent": "Europe"},
+    "+212": {"iso": "MA", "country": "Morocco", "currency": "MAD", "continent": "Africa"},
+    "+34":  {"iso": "ES", "country": "Spain", "currency": "EUR", "continent": "Europe"},
+    "+39":  {"iso": "IT", "country": "Italy", "currency": "EUR", "continent": "Europe"},
+    "+41":  {"iso": "CH", "country": "Switzerland", "currency": "CHF", "continent": "Europe"},
+    "+43":  {"iso": "AT", "country": "Austria", "currency": "EUR", "continent": "Europe"},
+    "+32":  {"iso": "BE", "country": "Belgium", "currency": "EUR", "continent": "Europe"},
+    "+351": {"iso": "PT", "country": "Portugal", "currency": "EUR", "continent": "Europe"},
+    "+353": {"iso": "IE", "country": "Ireland", "currency": "EUR", "continent": "Europe"},
+    "+380": {"iso": "UA", "country": "Ukraine", "currency": "UAH", "continent": "Europe"},
+    "+420": {"iso": "CZ", "country": "Czech Republic", "currency": "CZK", "continent": "Europe"},
+    "+421": {"iso": "SK", "country": "Slovakia", "currency": "EUR", "continent": "Europe"},
+    "+36":  {"iso": "HU", "country": "Hungary", "currency": "HUF", "continent": "Europe"},
+    "+40":  {"iso": "RO", "country": "Romania", "currency": "RON", "continent": "Europe"},
+    "+30":  {"iso": "GR", "country": "Greece", "currency": "EUR", "continent": "Europe"},
+    "+90":  {"iso": "TR", "country": "Turkey", "currency": "TRY", "continent": "Europe/Asia"},
+    "+971": {"iso": "AE", "country": "United Arab Emirates", "currency": "AED", "continent": "Asia"},
+    "+966": {"iso": "SA", "country": "Saudi Arabia", "currency": "SAR", "continent": "Asia"},
+    "+20":  {"iso": "EG", "country": "Egypt", "currency": "EGP", "continent": "Africa"},
+    "+216": {"iso": "TN", "country": "Tunisia", "currency": "TND", "continent": "Africa"},
+    "+213": {"iso": "DZ", "country": "Algeria", "currency": "DZD", "continent": "Africa"},
+    "+61":  {"iso": "AU", "country": "Australia", "currency": "AUD", "continent": "Oceania"},
+    "+64":  {"iso": "NZ", "country": "New Zealand", "currency": "NZD", "continent": "Oceania"},
+    "+91":  {"iso": "IN", "country": "India", "currency": "INR", "continent": "Asia"},
+    "+81":  {"iso": "JP", "country": "Japan", "currency": "JPY", "continent": "Asia"},
+    "+82":  {"iso": "KR", "country": "South Korea", "currency": "KRW", "continent": "Asia"},
+    "+55":  {"iso": "BR", "country": "Brazil", "currency": "BRL", "continent": "South America"},
+    "+52":  {"iso": "MX", "country": "Mexico", "currency": "MXN", "continent": "North America"},
 }
 
 def parse_and_detect_phone(raw_phone: str) -> Dict[str, Any]:
@@ -115,6 +142,12 @@ def parse_and_detect_phone(raw_phone: str) -> Dict[str, Any]:
             line_type = "Swedish Geographic Landline"
     elif detected_prefix == "+1":
         line_type = "North American Numbering Plan (NANP)"
+    elif detected_prefix == "+212":
+        nat = digits_only[3:] if digits_only.startswith("212") else digits_only
+        if nat and nat[0] in ("6", "7"):
+            line_type = "Moroccan Mobile Line (Orange / Inwi / Maroc Telecom)"
+        else:
+            line_type = "Moroccan Fixed Line"
 
     return {
         "is_valid": len(digits_only) >= 7,
@@ -379,6 +412,38 @@ def get_country_directories(
                 "badge": "telefoonboek.nl",
                 "description": "Dutch residential address, telephone, and business registry.",
                 "url": f"https://www.telefoonboek.nl/zoeken/{encoded_q}/",
+                "is_primary": False
+            }
+        ],
+        "MA": [
+            {
+                "country": "Morocco",
+                "flag": "MA",
+                "name": "Avito.ma Maroc Classifieds & Contact Search",
+                "category": "Marketplace & Classifieds",
+                "badge": "avito.ma",
+                "description": "Morocco's largest digital classifieds index: phone numbers, vehicle sales, real estate, and merchant listings.",
+                "url": f"https://www.avito.ma/fr/maroc/?q={digits_only[-9:] if is_phone else encoded_q}",
+                "is_primary": True
+            },
+            {
+                "country": "Morocco",
+                "flag": "MA",
+                "name": "Telecontact.ma Pages Jaunes Maroc",
+                "category": "National Directory",
+                "badge": "telecontact.ma",
+                "description": "Moroccan national corporate and professional telephone directory (Yellow Pages).",
+                "url": f"https://www.telecontact.ma/recherche.php?type=activite&nom={digits_only[-9:] if is_phone else encoded_q}",
+                "is_primary": False
+            },
+            {
+                "country": "Morocco",
+                "flag": "MA",
+                "name": "Exact Telephony Google Dork",
+                "category": "Search Operators",
+                "badge": "google.com",
+                "description": "Searches for raw paste site leaks, forum posts, and documents mentioning this phone number.",
+                "url": f"https://www.google.com/search?q={encoded_quote}",
                 "is_primary": False
             }
         ]

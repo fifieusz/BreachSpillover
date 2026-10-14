@@ -134,7 +134,12 @@ def query_historical_archives(domain: str) -> Dict[str, Any]:
     Deduplicates URLs, classifies sensitive exposed endpoints, and extracts discovered subdomains.
     """
     clean_dom = domain.strip().lower().lstrip("@")
-    if not clean_dom or "." not in clean_dom:
+    freemails = {
+        "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "proton.me",
+        "protonmail.com", "icloud.com", "aol.com", "mail.com", "zoho.com",
+        "live.com", "msn.com", "osint.local", "yandex.com", "gmx.com"
+    }
+    if not clean_dom or "." not in clean_dom or clean_dom in freemails:
         return {
             "domain": domain,
             "total_urls_indexed": 0,
@@ -145,18 +150,22 @@ def query_historical_archives(domain: str) -> Dict[str, Any]:
 
     raw_items: List[Dict[str, Any]] = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+    try:
         f_otx = executor.submit(query_alienvault_otx_urls, clean_dom, limit=40)
         f_urlscan = executor.submit(query_urlscan_urls, clean_dom, size=30)
-        f_cdx = executor.submit(query_wayback_cdx_urls, clean_dom, limit=25)
+        f_cdx = executor.submit(query_wayback_cdx_urls, clean_dom, limit=25, timeout=2.0)
 
-        for f in concurrent.futures.as_completed([f_otx, f_urlscan, f_cdx]):
+        done, _ = concurrent.futures.wait([f_otx, f_urlscan, f_cdx], timeout=2.0)
+        for f in done:
             try:
                 res = f.result()
                 if res:
                     raw_items.extend(res)
             except Exception:
                 pass
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     # Deduplicate by URL
     seen_urls: Set[str] = set()

@@ -195,6 +195,26 @@ def set_manual_bridge_cookie(req: BridgeCookieRequest):
         clear_persisted_session()
         return {"success": True, "message": "LinkedIn session cookie cleared."}
 
+def _derive_authenticated_target_gender(arbiter_verdict: Dict[str, Any], pivots: List[Dict[str, Any]]) -> Optional[str]:
+    """
+    Resolves the target's declared gender from the arbiter verdict, or from
+    pronoun declarations on pivots that are bound to the target by email or
+    commit authorship. Unbound candidate pivots are never consulted, so a
+    namesake's self-description can never redefine the target.
+    """
+    from backend.identity_signals import normalize_gender, detect_declared_gender, has_auth_binding, is_visual_media_pivot
+    g = normalize_gender((arbiter_verdict or {}).get("perceived_gender"))
+    if g in ("male", "female"):
+        return g
+    for piv in pivots or []:
+        ctx = piv.get("context_note") or ""
+        if not has_auth_binding(ctx) or is_visual_media_pivot(piv):
+            continue
+        declared = detect_declared_gender(f"{piv.get('pivot_value') or ''} {ctx}", include_descriptors=False)
+        if declared in ("male", "female"):
+            return declared
+    return None
+
 @app.get("/api/search")
 @app.get("/api/scan")
 def search_exposure(
@@ -216,25 +236,39 @@ def search_exposure(
     Performs live OSINT pivoting and calculates the Spillover Score for an email or username handle.
     Integrates genuine breach indices, public platform footprints, and user-provided anchors.
     """
-    raw_target = (email or query or "").strip()
+    raw_target = ((email if isinstance(email, str) else "") or (query if isinstance(query, str) else "")).strip()
+    known_name = known_name if isinstance(known_name, str) else None
+    known_username = known_username if isinstance(known_username, str) else None
+    known_phone = known_phone if isinstance(known_phone, str) else None
+    known_city = known_city if isinstance(known_city, str) else None
     if not raw_target:
-        raise HTTPException(status_code=400, detail="Target email or username query is required.")
+        raise HTTPException(status_code=400, detail="Target email, phone, or username query is required.")
 
-    # Composite query decomposition: extract email and name if user entered combined query
-    # e.g. "Alex Morgan alex@example.com", "alex@example.com (Alex Morgan)", "Alex Morgan <alex@example.com>"
-    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', raw_target)
-    if email_match:
-        extracted_email = email_match.group(0).lower()
-        remainder = raw_target.replace(email_match.group(0), '').strip(" ()<>,;:[]\"'")
-        if remainder and not known_name:
-            if re.search(r'[a-zA-Z]{2,}', remainder) and not remainder.startswith("+"):
-                known_name = remainder.strip()
-        raw_target = extracted_email
+    # Universal Target Manifest Parser: decompose single or composite queries
+    from backend.target_parser import parse_target_manifest
+    passed_email = email if (email and "@" in email and " " not in email.strip()) else None
+    passed_phone = known_phone if (known_phone and re.search(r'\d{6,}', known_phone)) else None
+    manifest = parse_target_manifest(
+        raw_query=raw_target,
+        email=passed_email,
+        phone=passed_phone,
+        name=known_name,
+        username=known_username,
+        city=known_city
+    )
 
-    # Universal search routing: detect if input is a handle/username or full person name (no @)
-    is_domain = ("@" not in raw_target and "." in raw_target and any(raw_target.lower().endswith(tld) for tld in [".com", ".net", ".org", ".io", ".co", ".ai", ".gov", ".edu", ".pl", ".de", ".uk", ".dev", ".app"]))
-    if "@" not in raw_target and not raw_target.startswith("+"):
-        # Check if an existing profile matches this handle or email prefix
+    cleaned_email = manifest.canonical_email
+    known_name = manifest.name or (manifest.canonical_display_name if manifest.target_type in ["NAME", "COMPOSITE"] else known_name)
+    known_phone = manifest.phone_e164 or manifest.phone
+    known_username = manifest.username
+    known_city = manifest.city or known_city
+    known_country = manifest.country
+
+    is_phone_query = (manifest.target_type == "PHONE" or (manifest.phone and not manifest.email and not manifest.name))
+    phone_recon = manifest.phone_recon
+
+    # Check if an existing profile matches this handle or email prefix
+    if "@" not in raw_target and not is_phone_query and not manifest.email:
         conn_check = get_connection()
         cur_check = conn_check.cursor()
         cur_check.execute("""
@@ -245,32 +279,38 @@ def search_exposure(
         match_row = cur_check.fetchone()
         conn_check.close()
         if match_row:
+            cleaned_email = match_row["corporate_email"].lower()
             if not known_username:
                 known_username = raw_target
-            cleaned_email = match_row["corporate_email"].lower()
-        elif not is_domain:
-            if " " in raw_target and not known_name:
-                known_name = raw_target
-                cleaned_email = f"{raw_target.lower().replace(' ', '.')}@osint.local"
-            else:
-                if not known_username:
-                    known_username = raw_target
-                cleaned_email = f"{raw_target.lower()}@osint.local"
-        else:
-            cleaned_email = raw_target.lower()
-    else:
-        cleaned_email = raw_target.lower()
     
     # 0. Email & Domain Security Verification (RFC format, DNS, MX, Disposable detection)
     from backend.email_verifier import verify_email_address
     from backend.threat_intel import generate_threat_provenance_matrix
-    verification = verify_email_address(cleaned_email)
+    if is_phone_query and phone_recon:
+        verification = {
+            "is_valid": True,
+            "status": "VERIFIED_PHONE_TARGET",
+            "reason": f"Universal Telecom OSINT Query ({phone_recon.get('international_format') or raw_target}) verified via carrier routing.",
+            "domain": "telecom.recon",
+            "mx_found": True,
+            "is_disposable": False,
+            "provider_type": f"{phone_recon.get('carrier', 'Cellular')} ({phone_recon.get('country', 'Telecom')})",
+            "email_security": {
+                "mail_provider": phone_recon.get('carrier', 'Cellular Network'),
+                "spf_status": "N/A",
+                "dmarc_status": "N/A",
+                "spoofing_risk": "SAFE"
+            }
+        }
+    else:
+        verification = verify_email_address(cleaned_email)
     
     anchors = {
         "known_name": known_name,
         "known_username": known_username,
         "known_phone": known_phone,
-        "known_city": known_city
+        "known_city": known_city,
+        "known_country": known_country or (phone_recon.get("country") if phone_recon else None)
     }
 
     # Retrieve profile without inventing fake leaks unless explicitly simulated
@@ -313,16 +353,98 @@ def search_exposure(
         is_corporate=is_corp
     )
 
-    # 2. Build Interactive Vis.js Graph
+    # 1b. Entity Resolution & Identity Disambiguation Engine
+    from backend.entity_resolution import dissect_email_address, cluster_discovered_entities
+    email_dissection = dissect_email_address(cleaned_email, target_name=employee.get("full_name") or known_name or "")
+
+    authenticated_handles = set()
+    for piv in pivots:
+        ctx = (piv.get("context_note") or "").lower()
+        pval = (piv.get("pivot_value") or "").lower()
+        if "author commit" in ctx or "authenticated github" in ctx or "tied to target email" in ctx or "exact email" in ctx or "repository owned" in ctx:
+            m_h = re.search(r'@([a-zA-Z0-9_\-\.]+)', pval)
+            if m_h:
+                h_clean = m_h.group(1).lower().strip(" .-_+")
+                authenticated_handles.add(h_clean)
+                stem = re.sub(r'\d+$', '', h_clean)
+                if len(stem) >= 4:
+                    authenticated_handles.add(stem)
+    if email_dissection.get("canonical_user"):
+        authenticated_handles.add(email_dissection["canonical_user"])
+
+    candidate_profile_objs = []
+    for piv in pivots:
+        p_type = piv.get("pivot_type", "")
+        p_val = piv.get("pivot_value", "")
+        p_ctx = piv.get("context_note", "")
+        if p_type in ["PUBLIC_PROFILE", "SUSPECTED_ACCOUNT", "PERSONA_PIVOT"]:
+            p_url = ""
+            url_match = re.search(r'\[URL:\s*(https?://[^\s\]]+)\]', p_ctx)
+            if url_match:
+                p_url = url_match.group(1).strip()
+            plat = p_val.split(":")[0].strip() if ":" in p_val else "Platform"
+            h_val = p_val.split(":")[1].strip().lstrip("@") if ":" in p_val else ""
+            is_email_bound = ("exact email" in p_ctx.lower() or "tied to target email" in p_ctx.lower() or "author commit" in p_ctx.lower() or "gravatar profile tied to target email" in p_ctx.lower())
+            is_commit_bound = ("author commit" in p_ctx.lower() or "authenticated github" in p_ctx.lower() or any(ah in h_val.lower() for ah in authenticated_handles if len(ah) >= 4))
+            candidate_profile_objs.append({
+                "platform": plat,
+                "handle": h_val,
+                "url": p_url,
+                "profile_url": p_url,
+                "context": p_ctx,
+                "is_email_bound": is_email_bound,
+                "is_commit_bound": is_commit_bound,
+                "is_verified": p_type == "PUBLIC_PROFILE" or "[STATUS: VERIFIED]" in p_ctx,
+                "is_suspected": p_type == "SUSPECTED_ACCOUNT" or "[STATUS: SUSPECTED]" in p_ctx,
+                "confidence": piv.get("confidence_score", 0.50)
+            })
+
+    # Arbiter verdict persisted at scan time (sidecar JSON, no schema change).
+    try:
+        from backend.arbiter_store import load_verdict
+        arbiter_verdict = load_verdict(cleaned_email)
+    except Exception:
+        arbiter_verdict = {}
+
+    target_identity_info = {
+        "email": cleaned_email,
+        "arbiter_verdict": arbiter_verdict,
+        "aliases": list(arbiter_verdict.get("aliases") or []),
+        "perceived_gender": arbiter_verdict.get("perceived_gender"),
+        "pronouns": arbiter_verdict.get("pronouns") or "",
+        "full_name": (
+            arbiter_verdict.get("real_name")
+            if (arbiter_verdict.get("real_name") and " " in arbiter_verdict["real_name"])
+            else (employee.get("full_name") or known_name or "")
+        ),
+        "primary_handles": list(set([email_dissection["canonical_user"]] + list(authenticated_handles) + ([known_username.lower()] if known_username else []))),
+        "authenticated_handles": list(authenticated_handles),
+        "locations": [f.get("city") for f in footprints if f.get("city")] + [f.get("country") for f in footprints if f.get("country")],
+        "gender": _derive_authenticated_target_gender(arbiter_verdict, pivots)
+    }
+
+    identity_clusters_data = cluster_discovered_entities(
+        target_info=target_identity_info,
+        profiles=candidate_profile_objs,
+        pivots=pivots
+    )
+
+    # 2. Build Interactive Vis.js Graph (with Candidate Persona Subgraphs)
+    tagged_for_graph = identity_clusters_data.get("tagged_pivots") or []
+    graph_pivots = [
+        dict(p, persona_id=tagged_for_graph[i].get("persona_id")) if i < len(tagged_for_graph) else p
+        for i, p in enumerate(pivots)
+    ]
     graph = build_identity_graph(
         employee=employee,
         leaks=leaks,
         credentials=credentials,
-        pivots=pivots,
+        pivots=graph_pivots,
         footprints=footprints,
         relatives=relatives,
         audit_mode=audit_mode,
-        cross_correlations=cross_correlations
+        cross_correlations=cross_correlations,
+        candidate_clusters=identity_clusters_data["candidate_clusters"]
     )
 
     # 3. Format Data Objects
@@ -339,14 +461,58 @@ def search_exposure(
 
     from backend.hash_resolver import identify_hash_type
 
+    from backend.hash_resolver import resolve_hash_online
+    c_handles = [p.get("pivot_value") for p in pivots if p.get("pivot_type") in ["PERSONAL_EMAIL", "PUBLIC_PROFILE", "USER_HANDLE"]]
+
     masked_creds = []
     for cred in credentials:
         raw_hash = cred.get("password_hash")
+        raw_plain = cred.get("plaintext_password")
         masked_hash = None
         hash_info = None
+
+        # Automatic background resolution attempt if credential only has a hash
+        if raw_hash and not raw_plain:
+            res_obj = resolve_hash_online(
+                raw_hash,
+                target_context={
+                    "email": cleaned_email,
+                    "full_name": employee.get("full_name"),
+                    "handles": c_handles,
+                    "known_passwords": [c.get("plaintext_password") for c in credentials if c.get("plaintext_password")]
+                }
+            )
+            if res_obj.get("resolved") and res_obj.get("plaintext"):
+                raw_plain = res_obj["plaintext"]
+                # Save unmasked plaintext to database permanently
+                try:
+                    conn_update = get_connection()
+                    cur_update = conn_update.cursor()
+                    cur_update.execute("UPDATE credentials SET plaintext_password = ? WHERE id = ?", (raw_plain, cred["id"]))
+                    conn_update.commit()
+                    conn_update.close()
+                except Exception:
+                    pass
+
         if raw_hash:
             masked_hash = raw_hash if audit_mode else (raw_hash[:7] + "*" * max(0, len(raw_hash) - 7))
             hash_info = identify_hash_type(raw_hash)
+
+        threat_actor = cred.get("threat_actor_source") or "Exfiltrated Database / Stealer Dump"
+        if raw_plain:
+            secret_type = "RAW_PLAINTEXT"
+            origin_desc = f"Direct cleartext exfiltration via {cred.get('leak_name', 'Breach')} ({threat_actor})"
+            why_status = "Secret was exfiltrated in cleartext directly from malware log or unencrypted database leak. No cryptographic hashing was applied."
+        elif raw_hash:
+            secret_type = "CRYPTOGRAPHIC_HASH"
+            algo_name = (hash_info or {}).get("algorithm", "Cryptographic")
+            origin_desc = f"Hashed credential digest extracted from {cred.get('leak_name', 'Breach')} ({threat_actor})"
+            why_status = f"Service secured password with {algo_name} prior to incident. The plaintext cannot be displayed without cryptographic cracking or rainbow table resolution."
+        else:
+            secret_type = "UNKNOWN"
+            origin_desc = cred.get("leak_name", "Incident")
+            why_status = "Credential record present without exposed password or hash."
+
 
         masked_creds.append({
             "id": cred["id"],
@@ -354,26 +520,39 @@ def search_exposure(
             "leak_name": cred["leak_name"],
             "leak_type": cred["leak_type"],
             "username_or_email": mask_email(cred["username_or_email"], audit_mode),
-            "plaintext_password": mask_password(cred["plaintext_password"], audit_mode),
+            "plaintext_password": mask_password(raw_plain, audit_mode),
             "password_hash": masked_hash,
             "hash_intel": hash_info,
+            "secret_type": secret_type,
+            "origin_description": origin_desc,
+            "why_status": why_status,
+            "threat_actor_source": cred.get("threat_actor_source"),
             "password_pattern": cred["password_pattern"],
             "is_corporate_password_match": bool(cred["is_corporate_password_match"]),
             "domain_compromised": cred["domain_compromised"],
             "breach_date": cred["breach_date"],
-            "severity": cred["severity"]
+            "severity": cred["severity"],
+            "global_frequency": cred.get("global_frequency") or 0
         })
 
 
+
     masked_pivots = []
-    for piv in pivots:
+    pivots_source = identity_clusters_data.get("tagged_pivots", pivots)
+    for piv in pivots_source:
         masked_pivots.append({
-            "id": piv["id"],
+            "id": piv.get("id"),
             "pivot_type": piv["pivot_type"],
             "pivot_value": mask_pivot_value(piv["pivot_type"], piv["pivot_value"], audit_mode),
             "confidence_score": piv["confidence_score"],
             "context_note": piv["context_note"],
-            "leak_name": piv.get("leak_name", "Correlation Engine")
+            "leak_name": piv.get("leak_name", "Correlation Engine"),
+            "cluster_id": piv.get("cluster_id", "persona_target"),
+            "persona_id": piv.get("persona_id", "persona_target"),
+            "persona_label": piv.get("persona_label", ""),
+            "persona_badge": piv.get("persona_badge", ""),
+            "persona_color": piv.get("persona_color", "emerald"),
+            "is_namesake_collision": piv.get("is_namesake_collision", False)
         })
 
     masked_footprints = []
@@ -424,6 +603,39 @@ def search_exposure(
             item["exposed_data"] = matched or []
         item["circulation_intel"] = get_breach_circulation_intel(item.get("leak_name", ""), item.get("exposed_data"))
         formatted_leaks.append(item)
+
+    # 4b. Identify Breach Password Disclosures (Metadata disclosures where payload is undelivered)
+    leaks_with_creds = {c.get("leak_id") for c in credentials if c.get("leak_id")}
+    leaks_with_creds_names = {c.get("leak_name", "").strip().lower() for c in credentials if c.get("leak_name")}
+
+    password_disclosures = []
+    for lk in formatted_leaks:
+        exp = [str(x).lower() for x in (lk.get("exposed_data") or [])]
+        has_pwd_compromise = any("password" in x for x in exp)
+        if not has_pwd_compromise:
+            continue
+
+        lk_id = lk.get("id")
+        lk_name = (lk.get("leak_name") or "").strip()
+        if lk_id in leaks_with_creds or lk_name.lower() in leaks_with_creds_names:
+            continue
+
+        source_name = lk.get("threat_actor_source") or "XposedOrNot / HIBP Live Threat Intelligence"
+        password_disclosures.append({
+            "leak_id": lk_id,
+            "leak_name": lk_name,
+            "breach_date": lk.get("breach_date"),
+            "leak_type": lk.get("leak_type", "INCIDENT"),
+            "severity": lk.get("severity", "HIGH"),
+            "threat_actor_source": source_name,
+            "exposed_data": lk.get("exposed_data") or [],
+            "reason_undelivered": (
+                "The breach notification index (HaveIBeenPwned / XposedOrNot) officially verifies that passwords "
+                "were compromised in this incident. However, public breach verification APIs legally only publish "
+                "compromise notices and do NOT distribute raw passwords or hashes. To inspect the exact secret "
+                "from this breach, download the authentic raw dump or combolist and import it into the local database."
+            )
+        })
 
     # 5. Generate Threat Provenance & Attacker Vectors Matrix
     threat_matrix = generate_threat_provenance_matrix(
@@ -485,7 +697,7 @@ def search_exposure(
     dorks_intel = generate_osint_dorks(cleaned_email, eff_domain, discovered_names)
 
     # 5. Harvest target avatars & visual assets for Image Correlation
-    from backend.image_recon import harvest_target_images
+    from backend.image_recon import harvest_target_images, build_reverse_image_search_links, extract_image_perceptual_features
     candidate_handles = []
     for p in pivots:
         if p.get("pivot_type") == "PUBLIC_PROFILE":
@@ -495,36 +707,289 @@ def search_exposure(
     if known_username:
         candidate_handles.append(known_username.strip())
 
+    extra_avs = []
+    fb_profile_pivot_url = None
+    li_profile_pivot_url = None
+    for p in pivots:
+        if p.get("pivot_type") == "PUBLIC_PROFILE":
+            p_val = str(p.get("pivot_value", "")).lower()
+            ctx = p.get("context_note", "")
+            u_match = re.search(r'\[URL:\s*(https?://[^\s\]]+)\]', ctx)
+            if "facebook" in p_val and u_match:
+                fb_profile_pivot_url = u_match.group(1).strip()
+            elif "linkedin" in p_val and u_match:
+                li_profile_pivot_url = u_match.group(1).strip()
+
+    if employee.get("avatar_seed") and str(employee["avatar_seed"]).startswith("http") and "profile-framedphoto" not in str(employee["avatar_seed"]):
+        u = str(employee["avatar_seed"])
+        plat = "LinkedIn" if ("licdn" in u or "linkedin" in u) else ("Facebook" if ("fbcdn" in u or "facebook" in u) else "Dossier Profile")
+        extra_avs.append({
+            "platform": plat,
+            "url": u,
+            "image_url": u,
+            "profile_url": li_profile_pivot_url if plat == "LinkedIn" else (fb_profile_pivot_url if plat == "Facebook" else ""),
+            "source": f"{plat} Verified Face"
+        })
+
+    for p in pivots:
+        if p.get("pivot_type") == "AVATAR_CORRELATION":
+            u_match = re.search(r'(https?://[^\s\]]+)', f"{p.get('pivot_value', '')} {p.get('context_note', '')}")
+            if u_match:
+                u_str = u_match.group(1).rstrip("]")
+                plat = "Public Profile"
+                p_url = ""
+                if "linkedin" in u_str.lower() or "licdn" in u_str.lower():
+                    plat = "LinkedIn"
+                    p_url = li_profile_pivot_url or ""
+                elif "facebook" in u_str.lower() or "fbcdn" in u_str.lower():
+                    plat = "Facebook"
+                    p_url = fb_profile_pivot_url or ""
+                elif "github" in u_str.lower():
+                    plat = "GitHub"
+                elif "gravatar" in u_str.lower():
+                    plat = "Gravatar"
+                elif "pinimg" in u_str.lower() or "pinterest" in u_str.lower():
+                    plat = "Pinterest"
+                p_combined = f"{p.get('pivot_value', '')} {p.get('context_note', '')}".lower()
+                if "historical profile picture" in p_combined:
+                    src_title = f"{plat} Historical Profile Picture"
+                elif "uploaded" in p_combined:
+                    src_title = f"{plat} Uploaded Photo"
+                elif "historical cover" in p_combined:
+                    src_title = f"{plat} Historical Cover Photo"
+                elif "posted photo" in p_combined or "post / activity" in p_combined or "feedshare" in p_combined:
+                    src_title = f"{plat} Posted Photo"
+                elif "featured media" in p_combined or "featured" in p_combined:
+                    src_title = f"{plat} Featured Media"
+                elif "project media" in p_combined or "certification" in p_combined:
+                    src_title = f"{plat} Project Media"
+                elif "cover banner" in p_combined or "cover photo" in p_combined or "header cover" in p_combined:
+                    src_title = f"{plat} Cover Banner"
+                elif "album" in p_combined:
+                    src_title = f"{plat} Album Photo"
+                elif "cover" in p_combined:
+                    src_title = f"{plat} Cover Banner"
+                elif "banner" in p_combined and "asset" not in p_combined:
+                    src_title = f"{plat} Cover Banner"
+                else:
+                    src_title = f"{plat} Avatar"
+                extra_avs.append({
+                    "platform": plat,
+                    "url": u_str,
+                    "image_url": u_str,
+                    "profile_url": p_url,
+                    "source": src_title
+                })
+
     discovered_images = harvest_target_images(
         email=cleaned_email,
         target_name=employee.get("full_name", ""),
-        handles=candidate_handles
+        handles=candidate_handles,
+        extra_avatars=extra_avs
     )
 
-    # 6. Extract suggested phone directories based on target name and location
-    from backend.telecom_recon import get_country_directories, COUNTRY_CODE_MAP
-    target_country_iso = None
-    for foot in footprints:
-        if foot.get("country"):
-            for pfx, c_info in COUNTRY_CODE_MAP.items():
-                if c_info["country"].lower() in foot["country"].lower():
-                    target_country_iso = c_info["iso"]
+    # Annotate candidates with primary face status, classification, and AI reasoning
+    primary_seed = employee.get("avatar_seed")
+    pivot_reason_map = {}
+    for p in pivots:
+        if p.get("pivot_type") == "AVATAR_CORRELATION":
+            u_match = re.search(r'(https?://[^\s\]]+)', f"{p.get('pivot_value', '')} {p.get('context_note', '')}")
+            if u_match:
+                clean_u = u_match.group(1).rstrip("]")
+                ctx = p.get("context_note", "")
+                clean_r = re.sub(r'\[(?:STATUS|CLASSIFICATION|TIED|URL):[^\]]+\]\s*', '', ctx).strip()
+                if clean_r:
+                    pivot_reason_map[clean_u] = clean_r
+
+    for img in discovered_images:
+        img_url = img.get("image_url") or img.get("url")
+        if primary_seed and img_url == primary_seed:
+            img["is_primary"] = True
+            img["classification"] = "REAL_HUMAN_PORTRAIT"
+        elif "linkedin" in (img.get("platform", "")).lower() or "licdn" in str(img_url).lower():
+            is_banner = "banner" in (img.get("source", "")).lower() or "cover" in (img.get("source", "")).lower()
+            if is_banner:
+                img["classification"] = "WEBSITE_BANNER_OR_ASSET"
+            elif "avatar" in (img.get("source", "")).lower() or "headshot" in (img.get("source", "")).lower() or "face" in (img.get("source", "")).lower():
+                img["classification"] = "REAL_HUMAN_PORTRAIT"
+            else:
+                feat = img.get("_feat")
+                if not feat and img_url:
+                    feat = extract_image_perceptual_features(img_url)
+                if feat and feat.get("is_square_or_portrait") and feat.get("center_skin_ratio", 0) >= 0.08:
+                    img["classification"] = "REAL_HUMAN_PORTRAIT"
+                else:
+                    img["classification"] = "WEBSITE_BANNER_OR_ASSET"
+            if li_profile_pivot_url and not img.get("profile_url"):
+                img["profile_url"] = li_profile_pivot_url
+        elif "facebook" in (img.get("platform", "")).lower() or "fbcdn" in str(img_url).lower():
+            is_banner = "banner" in (img.get("source", "")).lower() or "cover" in (img.get("source", "")).lower()
+            img["classification"] = "WEBSITE_BANNER_OR_ASSET" if is_banner else "REAL_HUMAN_PORTRAIT"
+            if fb_profile_pivot_url and not img.get("profile_url"):
+                img["profile_url"] = fb_profile_pivot_url
+        else:
+            img["classification"] = img.get("classification") or "CARTOON_OR_AVATAR"
+
+        if img_url in pivot_reason_map:
+            img["reasoning"] = pivot_reason_map[img_url]
+
+    # Map images to identity clusters & personas for deterministic candidate filtering
+    clusters_list = identity_clusters_data.get("all_clusters", [])
+    for img in discovered_images:
+        img_url = (img.get("image_url") or img.get("url") or "").strip()
+        lbl = str(img.get("label", "")).lower()
+        src = str(img.get("source", "")).lower()
+        prof_u = str(img.get("profile_url", "")).lower()
+        plat = str(img.get("platform", "")).lower()
+        reason = str(img.get("reasoning", "")).lower()
+        img_text = f"{lbl} {src} {prof_u} {plat} {reason} {img_url}".lower()
+
+        assigned_cluster = "persona_target"
+
+        # 1. Match against candidate clusters via profiles and pivots
+        for cl in clusters_list:
+            if cl.get("is_primary"):
+                continue
+            cid = cl.get("cluster_id")
+
+            # Check if this cluster's profiles or pivots contain this image URL
+            cluster_has_img = False
+            for p in cl.get("pivots", []):
+                p_text = (str(p.get("pivot_value", "")) + " " + str(p.get("context_note", ""))).lower()
+                if img_url and img_url.lower() in p_text:
+                    cluster_has_img = True
                     break
-            if target_country_iso:
+            if not cluster_has_img:
+                for prof in cl.get("profiles", []):
+                    prof_text = str(prof).lower()
+                    if (img_url and img_url.lower() in prof_text) or (prof_u and prof.get("url") and str(prof.get("url")).lower() in prof_u):
+                        cluster_has_img = True
+                        break
+
+            if cluster_has_img:
+                assigned_cluster = cid
                 break
+
+            # 2. Token / handle matching for specific candidate personas
+            tokens_to_match = []
+            if cid.startswith("alias_"):
+                tokens_to_match.append(cid.replace("alias_", "").lower())
+            elif cid.startswith("lead_"):
+                tokens_to_match.append(cid.replace("lead_", "").lower())
+            elif cid.startswith("namesake_"):
+                tokens_to_match.append(cid.replace("namesake_", "").lower())
+
+            matched_tok = False
+            for tok in tokens_to_match:
+                if len(tok) >= 3:
+                    if (f"/{tok}" in img_text or f"@{tok}" in img_text or f"({tok})" in img_text or 
+                        f"_{tok}" in img_text or f".{tok}" in img_text or f" {tok} " in img_text or
+                        f"{tok}.png" in img_text or f"{tok}.jpg" in img_text or f"={tok}" in img_text):
+                        assigned_cluster = cid
+                        matched_tok = True
+                        break
+            if matched_tok:
+                break
+
+        # Fallback check: Target Platform Assets (LinkedIn, Facebook, Gravatar) belong to primary target
+        if "facebook" in img_url.lower() or "fbcdn" in img_url.lower() or "linkedin" in img_url.lower() or "licdn" in img_url.lower():
+            assigned_cluster = "persona_target"
+        elif "gravatar.com/avatar" in img_url.lower():
+            target_clean_email = (cleaned_email or "").strip().lower()
+            if target_clean_email:
+                import hashlib
+                target_md5 = hashlib.md5(target_clean_email.encode("utf-8")).hexdigest()
+                if target_md5 in img_url.lower():
+                    assigned_cluster = "persona_target"
+
+        img["cluster_id"] = assigned_cluster
+        img["persona_id"] = assigned_cluster
+
+        # Find cluster obj and link
+        for cl in clusters_list:
+            if cl.get("cluster_id") == assigned_cluster:
+                img["persona_label"] = cl.get("cluster_label")
+                img["persona_badge"] = cl.get("badge")
+                img["persona_color"] = cl.get("color")
+                cl.setdefault("images", []).append(img)
+                break
+
+    # 6. Extract suggested phone directories based on target name, phone, and location
+    from backend.telecom_recon import get_country_directories, COUNTRY_CODE_MAP
+    target_country_iso = phone_recon.get("country_iso") if (is_phone_query and phone_recon) else None
+    if not target_country_iso:
+        for foot in footprints:
+            if foot.get("country"):
+                for pfx, c_info in COUNTRY_CODE_MAP.items():
+                    if c_info["country"].lower() in foot["country"].lower():
+                        target_country_iso = c_info["iso"]
+                        break
+                if target_country_iso:
+                    break
+
+    target_phone_val = (phone_recon.get("e164") or raw_target) if is_phone_query else known_phone
     suggested_phone_directories = get_country_directories(
-        query=employee.get("full_name") or cleaned_email,
+        query=target_phone_val if (is_phone_query or target_phone_val) else (employee.get("full_name") or cleaned_email),
         country_iso=target_country_iso or "GLOBAL",
-        query_type="person"
+        query_type="phone" if (is_phone_query or target_phone_val) else "person"
     )
+
+    # 7. Assemble Complete Investigation Execution Trace & Provenance
+    from backend.provenance_tracker import get_cached_trace, reconstruct_identity_provenance
+    execution_trace = get_cached_trace(cleaned_email)
+    if not execution_trace:
+        execution_trace = reconstruct_identity_provenance(
+            email=cleaned_email,
+            employee=employee,
+            leaks=formatted_leaks,
+            credentials=masked_creds,
+            pivots=masked_pivots,
+            footprints=masked_footprints,
+            relatives=masked_relatives,
+            images=discovered_images,
+            anchors=anchors
+        )
+
+    # 8. Extract & Audit all candidate password strings connected to target identity
+    from backend.password_auditor import get_target_connected_strings
+    from backend.public_leaks_aggregator import get_active_engines_summary
+    connected_target_ctx = {
+        "email": cleaned_email,
+        "full_name": employee.get("full_name") or known_name or "",
+        "handles": c_handles,
+        "known_passwords": [c.get("plaintext_password") for c in credentials if c.get("plaintext_password")]
+    }
+    connected_strings_audit = get_target_connected_strings(connected_target_ctx, limit=15)
+    active_leak_engines = get_active_engines_summary()
+
+    effective_phone_recon = phone_recon
+    if not effective_phone_recon and known_phone:
+        try:
+            effective_phone_recon = reverse_phone_lookup(known_phone)
+        except Exception:
+            effective_phone_recon = None
+
+    # Autonomous Cardinal Intelligence Core reasoning cycle
+    from backend.cardinal import Cardinal
+    cardinal_core = Cardinal()
+    cardinal_res = cardinal_core.investigate(manifest, refresh=False)
 
     return {
         "employee": masked_emp,
+        "target_type": manifest.target_type,
+        "active_pillars": manifest.active_pillars,
+        "target_manifest": manifest.to_dict(),
+        "cardinal_autonomous": cardinal_res.to_dict(),
+        "cardinal_thoughts": [t.to_dict() for t in cardinal_res.thoughts],
+        "phone_recon": effective_phone_recon,
         "email_verification": verification,
         "threat_provenance_matrix": threat_matrix,
         "spillover_score": spillover,
         "leaks": formatted_leaks,
         "credentials": masked_creds,
+        "password_disclosures": password_disclosures,
+        "connected_strings_audit": connected_strings_audit,
+        "public_leak_engines": active_leak_engines,
         "pivots": masked_pivots,
         "physical_footprints": masked_footprints,
         "relatives": masked_relatives,
@@ -534,10 +999,88 @@ def search_exposure(
         "osint_dorks": dorks_intel,
         "images": discovered_images,
         "suggested_phone_directories": suggested_phone_directories,
+        "email_dissection": email_dissection,
+        "identity_clusters": identity_clusters_data.get("all_clusters", []),
+        "primary_entity": identity_clusters_data.get("primary_entity", {}),
+        "candidate_clusters": identity_clusters_data.get("candidate_clusters", []),
+        "personas": identity_clusters_data.get("personas", []),
         "audit_mode": audit_mode,
         "cross_target_correlations": cross_correlations,
+        "execution_trace": execution_trace,
         "scenario": scenario or ("clean" if spillover["score"] == 0 else "full")
     }
+
+class PasswordAuditRequest(BaseModel):
+    password: str
+    email: Optional[str] = None
+    target_name: Optional[str] = None
+    save_to_identity: bool = False
+
+@app.post("/api/password/audit")
+def api_audit_password(req: PasswordAuditRequest):
+    """
+    Forensic self-audit of a candidate or recalled password phrase:
+    - Queries HIBP k-Anonymity global database (800M+ real passwords)
+    - Measures Shannon entropy and keyspace complexity
+    - Computes lateral movement and Spillover Risk Score
+    - Optionally binds/links the verified credential to the target identity
+    """
+    from backend.password_auditor import audit_password_phrase
+    clean_pwd = req.password.strip()
+    if not clean_pwd:
+        raise HTTPException(status_code=400, detail="Password string cannot be empty.")
+
+    target_ctx = {
+        "email": req.email or "",
+        "full_name": req.target_name or ""
+    }
+    res = audit_password_phrase(clean_pwd, target_context=target_ctx, check_hibp=True)
+
+    if req.save_to_identity and req.email:
+        from backend.database import get_or_create_identity_profile, get_connection
+        profile = get_or_create_identity_profile(req.email)
+        emp_id = profile["id"]
+
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM leaks WHERE leak_name = 'Self-Audited Credential (2019 Legacy Audit)'")
+        lk_row = cur.fetchone()
+        if lk_row:
+            leak_id = lk_row["id"]
+        else:
+            cur.execute("""
+                INSERT INTO leaks (leak_name, leak_type, breach_date, description, threat_actor_source, severity)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                "Self-Audited Credential (2019 Legacy Audit)",
+                "USER_AUDIT",
+                "2019-05-24",
+                "Confirmed authentic password phrase self-audited by target user.",
+                "User Self-Audit Forensic Verification",
+                "HIGH"
+            ))
+            leak_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO credentials (leak_id, employee_id, username_or_email, plaintext_password, password_hash, password_pattern, is_corporate_password_match, domain_compromised, global_frequency)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            leak_id,
+            emp_id,
+            req.email,
+            clean_pwd,
+            None,
+            res.get("pattern", "Self-Audited Phrase"),
+            0,
+            "self-audited.local",
+            res.get("global_frequency", 0)
+        ))
+        conn.commit()
+        conn.close()
+        res["saved_to_identity"] = True
+        res["employee_id"] = emp_id
+
+    return res
 
 class ProfileIngestRequest(BaseModel):
     target_email: Optional[str] = None
@@ -779,14 +1322,21 @@ def get_browser_runner_status():
     from backend.browser_runner import is_browser_authenticated
     return is_browser_authenticated()
 
+class BrowserLaunchRequest(BaseModel):
+    target: Optional[str] = "all"
+
 @app.post("/api/browser/launch")
-def launch_browser_for_auth():
+def launch_browser_for_auth(target: Optional[str] = None, req: Optional[BrowserLaunchRequest] = None):
     """
-    Opens an interactive browser window using the persistent profile
-    so the investigator can log into LinkedIn once (via Google SSO or password).
+    Opens an interactive browser window using Playwright so the investigator can log in.
+    Supports:
+    - target="all": multi-tab session with LinkedIn and Facebook
+    - target="linkedin": LinkedIn login
+    - target="facebook": Facebook login
     """
+    chosen = (req.target if req and req.target else target) or "all"
     from backend.browser_runner import launch_interactive_login
-    return launch_interactive_login()
+    return launch_interactive_login(target=chosen)
 
 @app.post("/api/browser/sync_target")
 def sync_browser_target_profile(req: BrowserSyncRequest):
@@ -894,6 +1444,32 @@ def api_save_linkedin_cookie(req: LinkedInCookieSaveRequest):
     from backend.session_vault import save_linkedin_cookie_to_env
     return save_linkedin_cookie_to_env(cookie_str=req.cookie, jsessionid_str=req.jsessionid)
 
+class FacebookCookieVerifyRequest(BaseModel):
+    c_user: Optional[str] = None
+    xs: Optional[str] = None
+
+@app.post("/api/sessions/verify_facebook")
+def api_verify_facebook_session(req: Optional[FacebookCookieVerifyRequest] = None):
+    """
+    Actively tests if Facebook c_user and xs cookies are currently valid against Meta, returning account details.
+    """
+    from backend.session_vault import verify_facebook_cookie
+    c_user = req.c_user if req else None
+    xs = req.xs if req else None
+    return verify_facebook_cookie(c_user=c_user, xs=xs)
+
+class FacebookCookieSaveRequest(BaseModel):
+    c_user: str
+    xs: str
+
+@app.post("/api/sessions/save_facebook")
+def api_save_facebook_cookie(req: FacebookCookieSaveRequest):
+    """
+    Saves Facebook investigator credentials (c_user and xs) to .env, synchronizes storage_state.json, and validates live.
+    """
+    from backend.session_vault import save_facebook_cookie_to_env
+    return save_facebook_cookie_to_env(c_user=req.c_user, xs=req.xs)
+
 class CombolistImportRequest(BaseModel):
     raw_text: str
     leak_name: str = "Custom Combolist Leak"
@@ -918,6 +1494,19 @@ def import_breach_combolist_text(req: CombolistImportRequest):
         source=req.source
     )
     return result
+
+@app.get("/api/leaks/engines")
+def get_public_leak_engines():
+    """
+    Returns the real-time operational status and catalog of all public leak databases,
+    stealer intelligence networks, and credential lake connectors.
+    """
+    from backend.public_leaks_aggregator import get_active_engines_summary
+    return {
+        "status": "success",
+        "engines": get_active_engines_summary()
+    }
+
 
 @app.post("/api/scan/batch")
 def scan_batch_identities(req: BatchScanRequest):
@@ -1142,15 +1731,25 @@ def get_domain_recon(domain: str = Query(..., description="Target corporate doma
     }
 
 @app.get("/api/hash/resolve")
-def resolve_hash_endpoint(hash: str, algorithm: Optional[str] = None):
+def resolve_hash_endpoint(
+    hash: str,
+    algorithm: Optional[str] = None,
+    email: Optional[str] = None,
+    name: Optional[str] = None
+):
     """
     WhatBreach-grade Online Rainbow Table & Hash Cracker API:
-    Queries public hash-cracking lookup services and dictionary tables to resolve hashes.
+    Queries public hash-cracking lookup services, local high-speed rainbow tables,
+    and targeted context permutations to resolve hashes.
     """
     from backend.hash_resolver import resolve_hash_online
     if not hash or len(hash.strip()) < 8:
         raise HTTPException(status_code=400, detail="Please provide a valid cryptographic hash string.")
-    return resolve_hash_online(hash.strip(), algorithm_hint=algorithm)
+    target_ctx = None
+    if email or name:
+        target_ctx = {"email": email, "full_name": name}
+    return resolve_hash_online(hash.strip(), algorithm_hint=algorithm, target_context=target_ctx)
+
 class AIDossierRequest(BaseModel):
     email: str
     api_key: Optional[str] = None
@@ -1176,7 +1775,7 @@ def get_ai_dossier(req: AIDossierRequest):
     Generates a structured AI Threat Dossier using Groq (Llama 3.3 70B) or Gemini,
     with an intelligent offline deterministic fallback.
     """
-    from backend.ai_engine import generate_ai_threat_dossier
+    from backend.cardinal import generate_ai_threat_dossier
     scan_data = req.scan_data
     if not scan_data:
         scan_data = search_exposure(email=req.email, audit_mode=True)
@@ -1193,7 +1792,7 @@ def query_ai_copilot(req: AICopilotRequest):
     """
     Interactive Investigator Copilot: answers target-specific threat and mitigation questions.
     """
-    from backend.ai_engine import ai_copilot_chat
+    from backend.cardinal import ai_copilot_chat
     scan_data = req.scan_data
     if not scan_data:
         scan_data = search_exposure(email=req.email, audit_mode=True)
@@ -1212,7 +1811,7 @@ def test_ai_key(req: AITestKeyRequest):
     Validates a Groq or Gemini API key with a fast 1-token probe.
     If no key is sent in the body, it checks .env or environment variables.
     """
-    from backend.ai_engine import test_ai_connection, resolve_api_key
+    from backend.cardinal.llm import test_ai_connection, resolve_api_key
     clean_key = (req.api_key or "").strip() or resolve_api_key(req.provider or "groq")
     if not clean_key:
         raise HTTPException(status_code=400, detail="API key is required or not found in .env.")
@@ -1224,7 +1823,7 @@ def get_ai_status():
     Returns server-side AI configuration state so the frontend can display
     active connection status when keys are configured in .env.
     """
-    from backend.ai_engine import resolve_api_key, GROQ_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL
+    from backend.cardinal.llm import resolve_api_key, GROQ_DEFAULT_MODEL, GEMINI_DEFAULT_MODEL
     groq_key = resolve_api_key("groq")
     gemini_key = resolve_api_key("gemini")
 

@@ -11,7 +11,7 @@ import time
 import urllib.request
 import urllib.parse
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import concurrent.futures
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -22,8 +22,9 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
-# In-memory cache for loaded sites
+# In-memory cache for loaded sites and query results
 _WMN_SITES: List[Dict[str, Any]] = []
+_WMN_RESULT_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
 # High-value priority sites for quick triage
 PRIORITY_SITES = [
@@ -54,7 +55,7 @@ def load_wmn_catalog() -> List[Dict[str, Any]]:
         print(f"[!] Error loading WMN catalog: {e}")
         return []
 
-def check_single_site(site: Dict[str, Any], handle: str, timeout: float = 2.5) -> Optional[Dict[str, Any]]:
+def check_single_site(site: Dict[str, Any], handle: str, timeout: float = 1.5) -> Optional[Dict[str, Any]]:
     """
     Probes a single site endpoint for handle existence using WMN signature rules.
     Returns result dict if confirmed, otherwise None.
@@ -126,6 +127,13 @@ def enumerate_handle_wmn(
     if not clean_handle:
         return {"handle": "", "total_scanned": 0, "matches_count": 0, "matches": []}
 
+    cache_key = f"{clean_handle.lower()}::{category}::{max_sites}::{priority_only}"
+    now = time.time()
+    if cache_key in _WMN_RESULT_CACHE:
+        c_time, c_val = _WMN_RESULT_CACHE[cache_key]
+        if now - c_time < 300.0:
+            return c_val
+
     all_sites = load_wmn_catalog()
     if not all_sites:
         return {"handle": clean_handle, "total_scanned": 0, "matches_count": 0, "matches": []}
@@ -162,10 +170,12 @@ def enumerate_handle_wmn(
 
     matches.sort(key=lambda m: (m["platform"] not in PRIORITY_SITES, m["platform"]))
 
-    return {
+    result = {
         "handle": clean_handle,
         "total_scanned": len(selected_sites),
         "matches_count": len(matches),
         "matches": matches,
         "categories_checked": list(set(s.get("cat", "other") for s in selected_sites))
     }
+    _WMN_RESULT_CACHE[cache_key] = (now, result)
+    return result

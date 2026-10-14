@@ -39,7 +39,7 @@ def main():
     else:
         print(f"[+] Using existing local database: {db_file}")
 
-    from backend.ai_engine import load_dotenv
+    from backend.cardinal.llm import load_dotenv
     load_dotenv()
     if os.getenv("GROQ_API_KEY"):
         print("[+] AI Threat Engine: ONLINE (Groq Llama 3.3 key detected)")

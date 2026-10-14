@@ -208,7 +208,7 @@ def query_github_user(handle: str) -> Optional[Dict[str, Any]]:
     url = f"https://api.github.com/users/{urllib.parse.quote(clean_h)}"
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github.v3+json"})
     try:
-        with urllib.request.urlopen(req, timeout=3.5) as resp:
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
             if resp.status == 200:
                 data = json.loads(resp.read().decode("utf-8", errors="ignore"))
                 if data.get("login"):
@@ -320,7 +320,10 @@ def query_duolingo_user(handle: str) -> Optional[Dict[str, Any]]:
 
 
 def query_keybase_user(handle: str) -> Optional[Dict[str, Any]]:
-    """Queries Keybase public directory for cryptographic proofs and social identity links."""
+    """
+    Queries Keybase public directory for cryptographic proofs and cross-platform identity links.
+    Extracts verified Twitter, GitHub, Reddit, HackerNews, and personal domain attestations.
+    """
     clean_h = handle.strip().lower()
     if not clean_h or len(clean_h) < 3:
         return None
@@ -335,6 +338,28 @@ def query_keybase_user(handle: str) -> Optional[Dict[str, Any]]:
                 if thems and thems[0]:
                     user_data = thems[0]
                     prof = user_data.get("profile", {}) or {}
+                    proofs = user_data.get("proofs_summary", {}).get("all", [])
+
+                    linked_proofs = []
+                    proof_tokens = []
+                    for p in proofs:
+                        ptype = p.get("proof_type")
+                        ntag = p.get("nametag")
+                        surl = p.get("service_url")
+                        if ptype and ntag:
+                            linked_proofs.append({
+                                "platform": ptype,
+                                "handle": ntag,
+                                "url": surl
+                            })
+                            proof_tokens.append(f"{ptype}:{ntag}")
+
+                    ctx_parts = [f"Keybase verified identity '{clean_h}'"]
+                    if prof.get("full_name"):
+                        ctx_parts.append(f"Name: {prof.get('full_name')}")
+                    if proof_tokens:
+                        ctx_parts.append(f"Cryptographic proofs: {', '.join(proof_tokens[:5])}")
+
                     return {
                         "platform": "Keybase",
                         "handle": clean_h,
@@ -342,8 +367,94 @@ def query_keybase_user(handle: str) -> Optional[Dict[str, Any]]:
                         "location": prof.get("location"),
                         "bio": prof.get("bio"),
                         "url": f"https://keybase.io/{clean_h}",
+                        "linked_identities": linked_proofs,
                         "is_verified": True,
-                        "confidence": 0.95
+                        "confidence": 0.98,
+                        "context": " - ".join(ctx_parts)
+                    }
+    except Exception:
+        pass
+    return None
+
+
+def query_hackernews_user(handle: str) -> Optional[Dict[str, Any]]:
+    """
+    Queries official Hacker News Firebase REST API for authentic developer/founder accounts.
+    Extracts karma rating, account creation epoch, and biographical submissions.
+    """
+    clean_h = handle.strip().lower()
+    if not clean_h or len(clean_h) < 2:
+        return None
+
+    url = f"https://hacker-news.firebaseio.com/v0/user/{urllib.parse.quote(clean_h)}.json"
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            if resp.status == 200:
+                raw = resp.read().decode("utf-8", errors="ignore")
+                if not raw or raw.strip() == "null":
+                    return None
+                data = json.loads(raw)
+                if data and isinstance(data, dict) and data.get("id"):
+                    hn_id = data.get("id")
+                    karma = data.get("karma", 0)
+                    about_raw = data.get("about", "")
+                    # Clean html tags from about text
+                    about_clean = re.sub(r'<[^>]+>', ' ', about_raw).strip() if about_raw else ""
+                    sub_count = len(data.get("submitted", []))
+
+                    ctx = f"Hacker News tech account '{hn_id}' (Karma: {karma}, Submissions: {sub_count})"
+                    if about_clean:
+                        ctx += f" - Bio: {about_clean[:120]}"
+
+                    return {
+                        "platform": "HackerNews",
+                        "handle": hn_id,
+                        "url": f"https://news.ycombinator.com/user?id={hn_id}",
+                        "display_name": hn_id,
+                        "bio": about_clean or None,
+                        "karma": karma,
+                        "created": data.get("created"),
+                        "submitted_count": sub_count,
+                        "is_verified": karma > 5,
+                        "confidence": 0.90 if karma > 10 else 0.80,
+                        "context": ctx
+                    }
+    except Exception:
+        pass
+    return None
+
+
+def query_wayback_snapshots(target_url: str) -> Optional[Dict[str, Any]]:
+    """
+    Queries Wayback Machine Availability API to uncover archived historical snapshots
+    of target personal domains, portfolios, or deleted social footprints.
+    """
+    clean_u = (target_url or "").strip()
+    if not clean_u or "." not in clean_u:
+        return None
+    if not clean_u.startswith("http"):
+        clean_u = f"https://{clean_u}"
+
+    api_url = f"https://archive.org/wayback/available?url={urllib.parse.quote(clean_u)}"
+    req = urllib.request.Request(api_url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                snap = data.get("archived_snapshots", {}).get("closest")
+                if snap and snap.get("available"):
+                    ts = snap.get("timestamp", "")
+                    formatted_ts = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}" if len(ts) >= 8 else ts
+                    return {
+                        "platform": "Wayback Machine",
+                        "target_url": clean_u,
+                        "archive_url": snap.get("url"),
+                        "timestamp": formatted_ts,
+                        "status": snap.get("status"),
+                        "is_verified": True,
+                        "confidence": 0.95,
+                        "context": f"Internet Archive Wayback Machine preserves historical snapshot from {formatted_ts}"
                     }
     except Exception:
         pass
@@ -385,6 +496,96 @@ def query_telegram_profile(handle: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def query_gravatar_handle(handle: str) -> Optional[Dict[str, Any]]:
+    """Queries Gravatar Public JSON API by handle/username for verified avatars, display names, and locations."""
+    clean_h = handle.strip().lower()
+    if not clean_h or len(clean_h) < 3:
+        return None
+
+    url = f"https://en.gravatar.com/{urllib.parse.quote(clean_h)}.json"
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                entries = data.get("entry", [])
+                if entries:
+                    ent = entries[0]
+                    disp = ent.get("displayName")
+                    pref_user = ent.get("preferredUsername") or clean_h
+                    loc = ent.get("currentLocation")
+                    about = ent.get("aboutMe")
+                    prof_url = ent.get("profileUrl") or f"https://gravatar.com/{pref_user}"
+                    photos = ent.get("photos", [])
+                    photo_url = photos[0].get("value") if photos else None
+
+                    ctx_parts = [f"Gravatar verified handle '@{pref_user}'"]
+                    if disp:
+                        ctx_parts.append(f"Display Name: {disp}")
+                    if loc:
+                        ctx_parts.append(f"Location: {loc}")
+
+                    return {
+                        "platform": "Gravatar",
+                        "handle": pref_user,
+                        "url": prof_url,
+                        "display_name": disp,
+                        "real_name": disp if (disp and " " in disp) else None,
+                        "location": loc,
+                        "bio": about,
+                        "avatar_url": photo_url,
+                        "is_verified": True,
+                        "confidence": 0.95,
+                        "context": " - ".join(ctx_parts)
+                    }
+    except Exception:
+        pass
+    return None
+
+
+def query_twitch_channel(handle: str) -> Optional[Dict[str, Any]]:
+    """Queries Twitch public channel page for verified streamer presence and bio descriptions."""
+    clean_h = handle.strip().lower()
+    if not clean_h or len(clean_h) < 3:
+        return None
+
+    url = f"https://www.twitch.tv/{urllib.parse.quote(clean_h)}"
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+    try:
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            if resp.status == 200:
+                html = resp.read().decode("utf-8", errors="ignore")
+                m_title = re.search(r'<title>(.*?)</title>', html)
+                title = m_title.group(1).strip() if m_title else ""
+                # Non-existent or generic channels only output "Twitch"
+                if title and title != "Twitch" and clean_h in title.lower():
+                    import html as html_lib
+                    m_desc = re.search(r'property="og:description"\s+content="([^"]*)"', html) or re.search(r'name="description"\s+content="([^"]*)"', html)
+                    raw_desc = m_desc.group(1).strip() if m_desc else ""
+                    desc = html_lib.unescape(raw_desc)
+                    desc = re.sub(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55\u203c-\u3299]', '', desc).strip()
+                    title = html_lib.unescape(title)
+                    title = re.sub(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55\u203c-\u3299]', '', title).strip()
+
+                    m_img = re.search(r'property="og:image"\s+content="([^"]*)"', html)
+                    avatar = m_img.group(1).strip() if m_img else None
+
+                    return {
+                        "platform": "Twitch",
+                        "handle": clean_h,
+                        "url": url,
+                        "display_name": clean_h,
+                        "bio": desc,
+                        "avatar_url": avatar,
+                        "is_verified": True,
+                        "confidence": 0.90,
+                        "context": f"Active Twitch channel: {title}" + (f" - Bio: {desc[:100]}" if desc else "")
+                    }
+    except Exception:
+        pass
+    return None
+
+
 def probe_all_direct_platforms(
     candidate_handles: List[str],
     target_name: Optional[str] = None,
@@ -392,7 +593,7 @@ def probe_all_direct_platforms(
 ) -> List[Dict[str, Any]]:
     """
     Executes concurrent high-speed direct REST API lookups across:
-    Chess.com, Steam, Roblox, GitHub, GitLab, DockerHub, Duolingo, Keybase, and Telegram.
+    Chess.com, Steam, Roblox, GitHub, GitLab, DockerHub, Duolingo, Keybase, Telegram, Gravatar, and Twitch.
     Guaranteed high fidelity, zero reliance on search engine scrapers.
     """
     clean_handles: List[str] = []
@@ -406,52 +607,30 @@ def probe_all_direct_platforms(
     discovered_results: List[Dict[str, Any]] = []
 
     def _worker(h: str):
+        probe_funcs = [
+            query_chess_profile,
+            query_steam_xml_profile,
+            query_roblox_user,
+            query_github_user,
+            query_gitlab_user,
+            query_dockerhub_user,
+            query_duolingo_user,
+            query_keybase_user,
+            query_telegram_profile,
+            query_gravatar_handle,
+            query_twitch_channel,
+            query_hackernews_user
+        ]
         hits = []
-        # 1. Chess.com
-        c_hit = query_chess_profile(h)
-        if c_hit:
-            hits.append(c_hit)
-
-        # 2. Steam
-        s_hit = query_steam_xml_profile(h)
-        if s_hit:
-            hits.append(s_hit)
-
-        # 3. Roblox
-        r_hit = query_roblox_user(h)
-        if r_hit:
-            hits.append(r_hit)
-
-        # 4. GitHub
-        gh_hit = query_github_user(h)
-        if gh_hit:
-            hits.append(gh_hit)
-
-        # 5. GitLab
-        gl_hit = query_gitlab_user(h)
-        if gl_hit:
-            hits.append(gl_hit)
-
-        # 6. DockerHub
-        dh_hit = query_dockerhub_user(h)
-        if dh_hit:
-            hits.append(dh_hit)
-
-        # 7. Duolingo
-        duo_hit = query_duolingo_user(h)
-        if duo_hit:
-            hits.append(duo_hit)
-
-        # 8. Keybase
-        kb_hit = query_keybase_user(h)
-        if kb_hit:
-            hits.append(kb_hit)
-
-        # 9. Telegram
-        t_hit = query_telegram_profile(h)
-        if t_hit:
-            hits.append(t_hit)
-
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as sub_ex:
+            f_hits = [sub_ex.submit(fn, h) for fn in probe_funcs]
+            for fut in concurrent.futures.as_completed(f_hits):
+                try:
+                    res = fut.result()
+                    if res:
+                        hits.append(res)
+                except Exception:
+                    pass
         return hits
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:

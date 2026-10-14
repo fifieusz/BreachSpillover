@@ -45,6 +45,7 @@ class SearchResponse(BaseModel):
     graph: Dict[str, Any]
     audit_mode: bool = False
     scenario: Optional[str] = "full"
+    execution_trace: Optional[Dict[str, Any]] = None
 
 class GlobalStats(BaseModel):
     total_employees: int

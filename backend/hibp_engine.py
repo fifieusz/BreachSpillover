@@ -22,7 +22,7 @@ def get_hibp_api_key() -> Optional[str]:
     key = os.getenv("HIBP_API_KEY", "").strip()
     if not key:
         try:
-            from backend.ai_engine import load_dotenv
+            from backend.cardinal.llm import load_dotenv
             load_dotenv()
             key = os.getenv("HIBP_API_KEY", "").strip()
         except Exception:

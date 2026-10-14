@@ -14,12 +14,13 @@ import base64
 import urllib.parse
 import urllib.request
 import concurrent.futures
+import time
 import logging
 from typing import Dict, Any, List, Optional, Set, Tuple
 
 logger = logging.getLogger("BreachSpillover.WebDorkRecon")
 
-from backend.ai_engine import call_groq_api, resolve_api_key, load_dotenv
+from backend.cardinal.llm import call_groq_api, resolve_api_key, load_dotenv
 
 USER_AGENT_MOBILE = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) "
@@ -383,130 +384,57 @@ def query_bing_search(query: str, max_results: int = 10) -> List[Dict[str, str]]
     return snippets
 
 
+# In-memory TTL cache for search snippets (5 min TTL)
+_SNIPPET_CACHE: Dict[str, Tuple[float, List[Dict[str, str]]]] = {}
+
 def query_search_snippets(query: str, max_results: int = 10) -> List[Dict[str, str]]:
     """
     Executes a search request against public search endpoints and parses result URLs, titles, and descriptive snippets.
-    Combines Bing Search, DuckDuckGo Lite, DuckDuckGo HTML, and Yahoo Search with resilient fallback.
+    Combines Bing Search and DuckDuckGo Lite with in-memory caching and fast short-circuiting.
     """
     global _DDG_FAILED_COUNT
+    clean_q = (query or "").strip().lower()
+    if not clean_q:
+        return []
+
+    now = time.time()
+    if clean_q in _SNIPPET_CACHE:
+        c_time, c_snips = _SNIPPET_CACHE[clean_q]
+        if now - c_time < 300.0:
+            return list(c_snips)
+
     snippets: List[Dict[str, str]] = []
     seen_urls: Set[str] = set()
 
-    # Step 0: High-reliability Unblocker Search (Scrape.do / ScraperAPI) if configured
-    global _UNBLOCKER_DISABLED
-    if not globals().get("_UNBLOCKER_DISABLED", False):
-        try:
-            from backend.unblocker_client import resolve_unblocker_config
-            cfg = resolve_unblocker_config()
-            token = cfg.get("api_key")
-            if token:
-                target_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-                if cfg.get("provider") == "scrapedo":
-                    scrape_url = f"https://api.scrape.do?token={token}&url={urllib.parse.quote(target_url)}"
-                else:
-                    scrape_url = f"http://api.scraperapi.com?api_key={token}&url={urllib.parse.quote(target_url)}"
-
-                req = urllib.request.Request(scrape_url, headers={"User-Agent": USER_AGENT_DESKTOP})
-                with urllib.request.urlopen(req, timeout=3.5) as resp:
-                    html = resp.read().decode("utf-8", errors="ignore")
-                    blocks = re.findall(r'<div class="result results_links[^"]*"[^>]*>(.*?)</div>\s*</div>', html, re.DOTALL)
-                    for b in blocks[:max_results]:
-                        title_m = re.search(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b)
-                        snip_m = re.search(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', b, re.DOTALL)
-                        clean_text = re.sub(r'<[^>]+>', ' ', b)
-                        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-                        if title_m:
-                            raw_href = title_m.group(1)
-                            qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_href).query)
-                            clean_url = qs.get("uddg", [raw_href])[0]
-                            title = re.sub(r'<[^>]+>', '', title_m.group(2)).strip()
-                            snip = re.sub(r'<[^>]+>', '', snip_m.group(1)).strip() if snip_m else clean_text
-                            if "duckduckgo.com" not in clean_url and clean_url not in seen_urls:
-                                seen_urls.add(clean_url)
-                                snippets.append({
-                                    "title": title,
-                                    "url": clean_url,
-                                    "snippet": snip[:350]
-                                })
-                if len(snippets) >= 3:
-                    return snippets
-        except urllib.error.HTTPError as he:
-            if he.code in (401, 402, 403, 429):
-                _UNBLOCKER_DISABLED = True
-                logger.info(f"Unblocker API key returned {he.code} (quota/unauthorized). Bypassing unblocker.")
-        except Exception as e:
-            logger.debug(f"Unblocker search notice: {e}")
-
     # Step 1: Query Bing Search first (fastest, decodes real target URLs and rich snippets)
-    bing_snips = query_bing_search(query, max_results=max_results)
-    for s in bing_snips:
-        u = s.get("url")
-        if u and u not in seen_urls:
-            seen_urls.add(u)
-            snippets.append(s)
+    try:
+        bing_snips = query_bing_search(query, max_results=max_results)
+        for s in bing_snips:
+            u = s.get("url")
+            if u and u not in seen_urls:
+                seen_urls.add(u)
+                snippets.append(s)
+    except Exception:
+        pass
+
+    # If Bing yielded sufficient results, return immediately (fast path, <1.5s)
+    if len(snippets) >= 3:
+        _SNIPPET_CACHE[clean_q] = (time.time(), snippets)
+        return snippets
 
     # Step 2: Query DuckDuckGo Lite if more results needed
     if len(snippets) < max_results:
-        lite_snips = query_duckduckgo_lite(query, max_results=max_results - len(snippets))
-        for s in lite_snips:
-            u = s.get("url")
-            if u and u not in seen_urls:
-                seen_urls.add(u)
-                snippets.append(s)
-
-    # Step 3: DuckDuckGo HTML if still sparse
-    if len(snippets) < 3:
         try:
-            data = urllib.parse.urlencode({"q": query}).encode("utf-8")
-            req = urllib.request.Request(
-                "https://html.duckduckgo.com/html/",
-                data=data,
-                headers={
-                    "User-Agent": USER_AGENT_DESKTOP,
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": "https://duckduckgo.com/",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.9"
-                }
-            )
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
-
-            blocks = re.findall(r'<div class="result results_links[^"]*"[^>]*>(.*?)</div>\s*</div>', html, re.DOTALL)
-            for b in blocks[:max_results]:
-                title_m = re.search(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b)
-                snip_m = re.search(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', b, re.DOTALL)
-                clean_text = re.sub(r'<[^>]+>', ' ', b)
-                clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-
-                if title_m:
-                    raw_href = title_m.group(1)
-                    qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_href).query)
-                    clean_url = qs.get("uddg", [raw_href])[0]
-                    title = re.sub(r'<[^>]+>', '', title_m.group(2)).strip()
-                    snip = re.sub(r'<[^>]+>', '', snip_m.group(1)).strip() if snip_m else clean_text
-
-                    if "duckduckgo.com" in clean_url or clean_url in seen_urls:
-                        continue
-
-                    seen_urls.add(clean_url)
-                    snippets.append({
-                        "title": title,
-                        "url": clean_url,
-                        "snippet": snip[:350]
-                    })
+            lite_snips = query_duckduckgo_lite(query, max_results=max_results - len(snippets))
+            for s in lite_snips:
+                u = s.get("url")
+                if u and u not in seen_urls:
+                    seen_urls.add(u)
+                    snippets.append(s)
         except Exception:
             pass
 
-    # Step 4: Yahoo Search fallback
-    if len(snippets) < 3:
-        yahoo_snips = query_yahoo_search(query, max_results=max_results)
-        for s in yahoo_snips:
-            u = s.get("url")
-            if u and u not in seen_urls:
-                seen_urls.add(u)
-                snippets.append(s)
-
+    _SNIPPET_CACHE[clean_q] = (time.time(), snippets)
     return snippets
 
 
@@ -616,6 +544,24 @@ def inspect_personal_site_metadata(url: str) -> Optional[Dict[str, Any]]:
         # Fallback bio snippet from clean page text if LLM extraction returned null
         if not intel.get("bio") and clean_text:
             intel["bio"] = clean_text[:300]
+
+        # OpenGraph or author image extraction from personal portfolio / website
+        og_m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if not og_m:
+            og_m = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', html, re.IGNORECASE)
+        if og_m:
+            og_raw = og_m.group(1).strip()
+            if og_raw and not og_raw.startswith("data:"):
+                intel["og_image"] = urllib.parse.urljoin(url, og_raw)
+
+        # Deep extract author portraits, banner photos, and visual identity assets
+        try:
+            from backend.image_recon import extract_images_from_webpage
+            extracted_media = extract_images_from_webpage(url, html=html)
+            if extracted_media:
+                intel["extracted_images"] = extracted_media
+        except Exception:
+            pass
 
         # Secondary email check
         mail_m = re.findall(r'mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})', html, re.IGNORECASE)
@@ -1020,8 +966,8 @@ def execute_ai_dork_recon(
             pass
         return None
 
-    probe_tasks = [(tmpl, h) for h in candidate_handles[:4] for tmpl in probe_templates]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+    probe_tasks = [(tmpl, h) for h in candidate_handles[:2] for tmpl in probe_templates[:3]]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
         futs = [ex.submit(_probe_single_site, tmpl, h) for tmpl, h in probe_tasks]
         for fut in concurrent.futures.as_completed(futs):
             hit = fut.result()
@@ -1033,7 +979,8 @@ def execute_ai_dork_recon(
                     "platform": "Portfolio",
                     "url": candidate_url,
                     "handle": h,
-                    "context": f"Verified Personal Web Portfolio ({h}) located via OSINT dork"
+                    "context": f"Verified Personal Web Portfolio ({h}) located via OSINT dork",
+                    "site_metadata": site_meta
                 })
                 if candidate_url not in seen_urls:
                     seen_urls.add(candidate_url)
@@ -1067,24 +1014,36 @@ def execute_ai_dork_recon(
 
     # Execute prioritized targeted live dorks concurrently
     prioritized_queries = []
-    has_real_target_name = bool(target_name and target_name.lower() not in ["target user", "webmail target", "target"])
+    has_real_target_name = bool(target_name and target_name.lower() not in ["target user", "webmail target", "target"] and len(target_name.split()) >= 2 and not any(ch.isdigit() for ch in target_name))
     if has_real_target_name:
         prioritized_queries.append(f'{target_name} linkedin')
+        prioritized_queries.append(f'{target_name} facebook')
+        prioritized_queries.append(f'site:facebook.com "{target_name}"')
         if org_stem:
             prioritized_queries.append(f'{target_name} {org_stem}')
         prioritized_queries.append(f'"{target_name}"')
         prioritized_queries.append(f'{target_name} security OR cyber')
         prioritized_queries.append(f'{target_name} CTO OR manager OR director')
-
-    if target_email and "@" in target_email:
-        prioritized_queries.append(f'"{target_email}"')
+        if target_email and "@" in target_email:
+            prioritized_queries.append(f'"{target_email}"')
+    else:
+        # Pseudonym, gamer tag, or handle target: focus on leaks, community boards, and self-doxxing patterns
+        target_handle = target_email.split("@")[0] if "@" in target_email else (target_name or "")
+        clean_stem = re.sub(r'\d+$', '', target_handle).strip(" .-_+") or target_handle
+        if target_email and "@" in target_email:
+            prioritized_queries.append(f'"{target_email}"')
+        if target_handle:
+            prioritized_queries.append(f'"{target_handle}" site:pastebin.com OR site:github.com OR site:rentry.co')
+            prioritized_queries.append(f'"{clean_stem}" site:reddit.com OR site:twitter.com OR site:twitch.tv OR site:steamcommunity.com')
+            prioritized_queries.append(f'"{target_handle}" ("my name is" OR "call me" OR "email" OR "discord")')
+            prioritized_queries.append(f'"{target_handle}"')
 
     for q in queries:
         if q not in prioritized_queries:
             prioritized_queries.append(q)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
-        futs = [ex.submit(query_search_snippets, q, 6) for q in prioritized_queries[:6]]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        futs = [ex.submit(query_search_snippets, q, 6) for q in prioritized_queries[:4]]
         for fut in concurrent.futures.as_completed(futs):
             try:
                 snips = fut.result()
@@ -1186,11 +1145,49 @@ def execute_ai_dork_recon(
             if v_fb and not any("facebook" in p.get("url", "") for p in final_result.get("profiles", [])):
                 final_result.setdefault("profiles", []).append(v_fb)
 
+    if final_result and site_metadata:
+        final_result["site_metadata"] = site_metadata
+        if site_metadata.get("extracted_images"):
+            final_result.setdefault("candidate_images", []).extend(site_metadata["extracted_images"])
+
     # Ingest verified personal sites discovered via direct candidate probing
     if final_result and discovered_personal_sites:
         for ps in discovered_personal_sites:
+            p_dict = {
+                "platform": "Portfolio",
+                "url": ps["url"],
+                "handle": ps.get("handle", ""),
+                "context": ps.get("context", "Verified Personal Web Portfolio")
+            }
             if not any(p.get("url") == ps["url"] for p in final_result.get("profiles", [])):
-                final_result.setdefault("profiles", []).append(ps)
+                final_result.setdefault("profiles", []).append(p_dict)
+
+            p_meta = ps.get("site_metadata") or {}
+            if p_meta.get("linkedin_url"):
+                if not any("linkedin.com" in p.get("url", "").lower() for p in final_result.get("profiles", [])):
+                    final_result.setdefault("profiles", []).append({
+                        "platform": "LinkedIn",
+                        "url": p_meta["linkedin_url"],
+                        "handle": target_name,
+                        "is_verified": True,
+                        "confidence": 0.98,
+                        "context": f"Verified LinkedIn link extracted directly from personal web portfolio ({ps['url']}) [STATUS: VERIFIED]"
+                    })
+            if p_meta.get("facebook_url"):
+                v_fb = extract_valid_facebook_profile(
+                    url=p_meta["facebook_url"],
+                    target_name=target_name,
+                    target_email=target_email,
+                    known_handles=handles
+                )
+                if v_fb and not any("facebook.com" in p.get("url", "").lower() for p in final_result.get("profiles", [])):
+                    final_result.setdefault("profiles", []).append(v_fb)
+            if p_meta.get("extracted_images"):
+                final_result.setdefault("candidate_images", []).extend(p_meta["extracted_images"])
+            if p_meta.get("secondary_emails"):
+                for sem in p_meta["secondary_emails"]:
+                    if sem not in final_result.setdefault("secondary_emails", []):
+                        final_result["secondary_emails"].append(sem)
 
     # Corporate identity and LinkedIn anti-scraping barrier handling (Zero-Auth Mode)
     # If the target belongs to a corporate domain (e.g. vooruit.nl -> Vooruit), enrich workplace
@@ -1394,6 +1391,9 @@ def execute_ai_dork_recon(
             if ph_clean and ph_clean not in clean_phones:
                 clean_phones.append(ph_clean)
         final_result["phone_numbers"] = clean_phones
+
+    if final_result and site_metadata:
+        final_result["site_metadata"] = site_metadata
 
     if final_result and final_result.get("is_corroborated"):
         _DORK_CACHE[cache_key] = final_result

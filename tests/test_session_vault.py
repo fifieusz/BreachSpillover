@@ -5,9 +5,10 @@ from backend.session_vault import get_vault_summary, verify_linkedin_cookie, get
 class TestSessionVault(unittest.TestCase):
 
     def test_vault_summary_unconfigured(self):
-        with patch("backend.session_vault.get_linkedin_cookie_from_sources", return_value=None), \
+        with patch("backend.session_vault.reload_env"), \
+             patch("backend.session_vault.get_linkedin_cookie_from_sources", return_value=None), \
              patch("backend.session_vault.get_linkedin_jsessionid_from_sources", return_value=None), \
-             patch.dict("os.environ", {"LINKEDIN_LI_AT": "", "LINKEDIN_JSESSIONID": ""}, clear=True):
+             patch.dict("os.environ", {"LINKEDIN_LI_AT": "", "LINKEDIN_JSESSIONID": "", "FACEBOOK_C_USER": "", "FACEBOOK_XS": ""}, clear=True):
             summary = get_vault_summary()
             self.assertEqual(summary["overall_status"], "problem")
             self.assertFalse(summary["is_good"])
@@ -49,6 +50,16 @@ class TestSessionVault(unittest.TestCase):
             self.assertFalse(summary["has_problem"])
             self.assertTrue(summary["linkedin"]["valid"])
             self.assertEqual(summary["linkedin"]["account_name"], "Alje Woltjer")
+
+    def test_vault_facebook_status(self):
+        with patch("backend.session_vault.reload_env"), \
+             patch("backend.session_vault.os.getenv", side_effect=lambda k, d="": {"FACEBOOK_C_USER": "1000123456789", "FACEBOOK_XS": "2:xs_token_abc_long_token"}.get(k, d)):
+            summary = get_vault_summary()
+            fb = summary.get("facebook", {})
+            self.assertTrue(fb.get("configured"))
+            self.assertTrue(fb.get("valid"))
+            self.assertEqual(fb.get("c_user"), "1000123456789")
+            self.assertEqual(fb.get("status"), "good")
 
 if __name__ == "__main__":
     unittest.main()

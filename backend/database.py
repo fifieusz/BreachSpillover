@@ -23,9 +23,14 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
-def init_db():
+def init_db(target_conn: Optional[sqlite3.Connection] = None):
     """Initializes the SQLite schema with foreign keys and performance indexes."""
-    conn = get_connection()
+    should_close = False
+    if target_conn is not None:
+        conn = target_conn
+    else:
+        conn = get_connection()
+        should_close = True
     cursor = conn.cursor()
 
     cursor.executescript("""
@@ -135,7 +140,16 @@ def init_db():
             pass
 
     conn.commit()
-    conn.close()
+    if should_close:
+        conn.close()
+
+def get_test_in_memory_db() -> sqlite3.Connection:
+    """Creates a fully isolated in-memory database with complete schema initialized for tests."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    init_db(target_conn=conn)
+    return conn
 
 def parse_name_from_email(email: str) -> str:
     cleaned = email.strip().lower()
@@ -143,11 +157,12 @@ def parse_name_from_email(email: str) -> str:
     
     # 1. Delimiter-separated names (e.g. john.smith, alex_morgan)
     parts = re.split(r'[._\-\+]+', local)
-    clean_parts = [re.sub(r'\d+', '', p).capitalize() for p in parts if len(re.sub(r'\d+', '', p)) >= 2]
-    if len(clean_parts) >= 2:
-        return " ".join(clean_parts)
-    elif len(clean_parts) == 1 and any(re.search(r'\d+', p) for p in parts):
-        return clean_parts[0]
+    if len(parts) >= 2:
+        clean_parts = [re.sub(r'\d+', '', p).capitalize() for p in parts if len(re.sub(r'\d+', '', p)) >= 2]
+        if len(clean_parts) >= 2:
+            return " ".join(clean_parts)
+        elif len(clean_parts) == 1 and any(re.search(r'\d+', p) for p in parts):
+            return clean_parts[0]
 
     # 2. Multilingual AI / Onomastic Identity Decomposer (Generic for any global culture/name)
     try:
@@ -213,22 +228,40 @@ def get_or_create_identity_profile(
             row = cursor.fetchone()
 
     if not row:
-        name = parse_name_from_email(cleaned_email)
+        anchor_name = (anchors.get("known_name") or "").strip() if anchors else ""
+        is_telecom_target = cleaned_email.endswith("@osint.local") and (cleaned_email.startswith("phone.") or bool(anchors and anchors.get("known_phone")))
+        if anchor_name and anchor_name not in ["Target User", "Webmail Target"]:
+            name = anchor_name
+        elif is_telecom_target:
+            phone_val = (anchors.get("known_phone") if anchors else "") or ("+" + cleaned_email.split("@")[0].replace("phone.", ""))
+            name = f"Telecom Target {phone_val}"
+        else:
+            name = parse_name_from_email(cleaned_email)
+            
         domain = cleaned_email.split("@")[1] if "@" in cleaned_email else "local"
         is_freemail = any(d in domain for d in ["gmail", "yahoo", "outlook", "hotmail", "proton", "icloud", "zoho", "mail", "live", "aol", "yandex"])
-        org_name = domain.split(".")[0].capitalize() if not is_freemail and "." in domain else f"Domain @{domain}"
-        profile_type = "Personal Account" if is_freemail else "Corporate Identity"
+        
+        if is_telecom_target:
+            phone_val = (anchors.get("known_phone") if anchors else "") or ("+" + cleaned_email.split("@")[0].replace("phone.", ""))
+            profile_type = "Verified Telecom Identifier"
+            org_name = f"Telecom Line: {phone_val}"
+        elif not is_freemail and "." in domain:
+            org_name = domain.split(".")[0].capitalize()
+            profile_type = "Corporate Identity"
+        else:
+            org_name = f"Domain @{domain}"
+            profile_type = "Personal Account"
         
         cursor.execute("""
             INSERT INTO employees (full_name, corporate_email, job_title, department, vip_level, avatar_seed)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (name, cleaned_email, profile_type, org_name, "Standard / Individual", name.lower().replace(" ", "_")))
+        """, (name, cleaned_email, profile_type, org_name, "Standard / Individual", None if is_telecom_target else name.lower().replace(" ", "_")))
         emp_id = cursor.lastrowid
         conn.commit()
         conn.close()
         
         has_custom = any([custom_password, custom_city, custom_street, custom_relative])
-        if scenario in ["clean", "partial", "full"] or has_custom:
+        if not is_telecom_target and (scenario in ["clean", "partial", "full"] or has_custom):
             from backend.seeder import seed_identity_scenario
             seed_identity_scenario(
                 emp_id, cleaned_email, name, scenario or "full",
@@ -267,15 +300,15 @@ def get_or_create_identity_profile(
             p_name_row = cursor.fetchone()
             if p_name_row and p_name_row["pivot_value"]:
                 verified_name = p_name_row["pivot_value"].replace("Full Name: ", "").replace("Legal Identity: ", "").strip()
-                if verified_name and not any(char.isdigit() for char in verified_name) and verified_name != current_name:
+                if verified_name and " " in verified_name and not any(char.isdigit() for char in verified_name) and verified_name != current_name:
                     name_to_use = verified_name
                     should_update_name = True
 
             if not should_update_name:
-                if any(char.isdigit() for char in current_name) and not any(char.isdigit() for char in parsed_better):
+                if " " in parsed_better and (" " not in current_name or current_name.lower().startswith("webmail") or current_name == "Target User"):
                     name_to_use = parsed_better
                     should_update_name = True
-                elif (" " not in current_name or current_name.lower().startswith("webmail") or current_name == "Target User") and (" " in parsed_better):
+                elif any(char.isdigit() for char in current_name) and not any(char.isdigit() for char in parsed_better):
                     name_to_use = parsed_better
                     should_update_name = True
 
@@ -313,7 +346,7 @@ def get_or_create_identity_profile(
             breaches = scan_email_breaches(cleaned_email)
             conn_b = get_connection()
             cur_b = conn_b.cursor()
-            ingest_breaches_to_profile(cur_b, emp_id, cleaned_email, name_to_use, breaches, anchors=anchors)
+            ingest_breaches_to_profile(cur_b, emp_id, cleaned_email, name_to_use, breaches, anchors=anchors, refresh=refresh)
             conn_b.commit()
             conn_b.close()
             return get_employee_by_id(emp_id)
@@ -366,7 +399,7 @@ def get_employee_credentials(emp_id: int) -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT c.*, l.leak_name, l.breach_date, l.leak_type, l.severity 
+        SELECT c.*, l.leak_name, l.breach_date, l.leak_type, l.severity, l.threat_actor_source
         FROM credentials c
         JOIN leaks l ON c.leak_id = l.id
         WHERE c.employee_id = ?

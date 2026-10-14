@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from fastapi.testclient import TestClient
 from backend.main import app
-from backend.ai_engine import (
+from backend.cardinal.llm import (
     generate_heuristic_fallback_dossier,
     generate_ai_threat_dossier,
     ai_copilot_chat,
@@ -118,7 +118,7 @@ class TestAIEngine(unittest.TestCase):
         self.assertEqual(dossier.get("provider"), "deterministic_heuristic")
 
     def test_dossier_caching(self):
-        with patch("backend.ai_engine.resolve_api_key", return_value=""):
+        with patch("backend.cardinal.llm.resolve_api_key", return_value=""):
             dossier1 = generate_ai_threat_dossier(self.sample_scan_data, api_key="", force_refresh=True)
             dossier2 = generate_ai_threat_dossier(self.sample_scan_data, api_key="", force_refresh=False)
             self.assertEqual(dossier1.get("generated_at"), dossier2.get("generated_at"))
@@ -126,14 +126,14 @@ class TestAIEngine(unittest.TestCase):
 
     def test_offline_ai_dossier_wrapper(self):
         # Without key, should seamlessly produce heuristic dossier with notice
-        with patch("backend.ai_engine.resolve_api_key", return_value=""):
+        with patch("backend.cardinal.llm.resolve_api_key", return_value=""):
             dossier = generate_ai_threat_dossier(self.sample_scan_data, api_key="")
             self.assertIn("executive_summary", dossier)
             self.assertIn("notice", dossier)
             self.assertFalse(dossier.get("is_ai_generated"))
 
     def test_offline_copilot_chat(self):
-        with patch("backend.ai_engine.resolve_api_key", return_value=""):
+        with patch("backend.cardinal.llm.resolve_api_key", return_value=""):
             # Test password question
             res_pwd = ai_copilot_chat("Tell me about passwords", self.sample_scan_data, api_key="")
             self.assertTrue(res_pwd["success"])
@@ -170,7 +170,7 @@ class TestAIEngine(unittest.TestCase):
         self.assertIn("reply", data)
 
     def test_api_test_key_endpoint_validation(self):
-        with patch("backend.ai_engine.resolve_api_key", return_value=""):
+        with patch("backend.cardinal.llm.resolve_api_key", return_value=""):
             # When no key is provided and no key is in env, should raise 400
             resp = client.post("/api/ai/test-key", json={"api_key": "", "provider": "groq"})
             self.assertEqual(resp.status_code, 400)

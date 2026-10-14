@@ -275,14 +275,14 @@ def calculate_spillover_score(
         "adversary_playbook": adversary_playbook,
         "vectors": {
             "stealer_exposure": {
-                "score": "CRITICAL" if has_stealer else "CLEAN",
+                "score": "CRITICAL" if has_stealer else ("MEDIUM" if len(leaks) > 0 else "CLEAN"),
                 "max": "CRITICAL",
                 "details": f"{len(stealer_leaks)} infostealer malware infection(s) detected" if has_stealer else ("No infostealer malware detected" if len(leaks) == 0 else f"{len(leaks)} verified database breach(es)")
             },
             "credential_severity": {
-                "score": "CRITICAL" if has_corporate_pattern else ("HIGH" if has_plaintext else "LOW"),
+                "score": "CRITICAL" if has_corporate_pattern else ("HIGH" if has_plaintext else ("MEDIUM" if len(credentials) > 0 else "CLEAN")),
                 "max": "CRITICAL",
-                "details": "Plaintext exfiltration & corporate match detected" if has_corporate_pattern else ("Plaintext password leaked" if has_plaintext else ("No credentials leaked" if len(credentials) == 0 else f"{len(credentials)} password hash(es) identified"))
+                "details": "Plaintext exfiltration & corporate match detected" if has_corporate_pattern else ("Plaintext password leaked" if has_plaintext else (f"{len(credentials)} password hash(es) identified" if len(credentials) > 0 else "No credentials leaked"))
             },
             "identity_pivot": {
                 "score": "HIGH" if (has_personal_email or has_phone) else "CLEAN",

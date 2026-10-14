@@ -27,26 +27,28 @@ class TestLinkedInBrowserBridge(unittest.TestCase):
             cookie = get_linkedin_cookie()
             self.assertEqual(cookie, "test_cookie_12345")
 
-    def test_google_login_and_degraded_notice(self):
+    @patch("backend.browser_bridge.extract_bridge_session", return_value=None)
+    def test_google_login_and_degraded_notice(self, mock_extract):
         from backend.browser_bridge import login_google_account, inspect_bridge_status, logout_account
         logout_account()
 
-        # Login with a Google account
-        res = login_google_account("agent@defense.org", "Defense Agent")
-        self.assertTrue(res["success"])
-        self.assertTrue(res["authenticated"])
-        self.assertEqual(res["user_email"], "agent@defense.org")
-        # No scraper authenticator attached, so degraded notice must be present
-        self.assertFalse(res["has_scraper_authenticator"])
-        self.assertIsNotNone(res["notice"])
-        self.assertIn("does not have a registered LinkedIn reconnaissance account", res["notice"])
+        with patch.dict("os.environ", {"LINKEDIN_LI_AT": "", "LINKEDIN_COOKIE": ""}, clear=False):
+            # Login with a Google account
+            res = login_google_account("agent@defense.org", "Defense Agent")
+            self.assertTrue(res["success"])
+            self.assertTrue(res["authenticated"])
+            self.assertEqual(res["user_email"], "agent@defense.org")
+            # No scraper authenticator attached, so degraded notice must be present
+            self.assertFalse(res["has_scraper_authenticator"])
+            self.assertIsNotNone(res["notice"])
+            self.assertIn("does not have a registered LinkedIn reconnaissance account", res["notice"])
 
-        # Check status endpoint
-        st = inspect_bridge_status()
-        self.assertTrue(st["authenticated"])
-        self.assertEqual(st["user_email"], "agent@defense.org")
-        self.assertFalse(st["has_scraper_authenticator"])
-        self.assertIn("does not have a registered LinkedIn reconnaissance account", st["notice"])
+            # Check status endpoint
+            st = inspect_bridge_status()
+            self.assertTrue(st["authenticated"])
+            self.assertEqual(st["user_email"], "agent@defense.org")
+            self.assertFalse(st["has_scraper_authenticator"])
+            self.assertIn("does not have a registered LinkedIn reconnaissance account", st["notice"])
 
         # Logout
         out = logout_account()

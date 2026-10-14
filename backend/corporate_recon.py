@@ -12,19 +12,86 @@ legal forms, and verified co-partners for ANY individual globally without hardco
 Strictly authentic OSINT: Zero hardcoded names, zero synthetic generation, zero emojis.
 """
 
+import copy
 import json
 import re
+import time
 import urllib.parse
 import urllib.request
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
-# In-memory cache for corporate reconnaissance queries
-_CORP_CACHE: Dict[str, Optional[Dict[str, Any]]] = {}
+# In-memory TTL cache for corporate reconnaissance queries
+_CORP_CACHE: Dict[str, Tuple[float, Optional[Dict[str, Any]]]] = {}
+_CORP_TTL_SECONDS = 300.0
+
+
+def query_sec_edgar_officers(target_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Live lookup against US Securities and Exchange Commission (SEC EDGAR) Full-Text Search API.
+    Discovers verified executive filings (Form 4, 10-K, DEF 14A, Form 144) for corporate officers and directors.
+    Completely free, public, and generic for any US corporate executive.
+    """
+    clean_name = (target_name or "").strip()
+    parts = clean_name.lower().split()
+    if not clean_name or len(parts) < 2:
+        return None
+
+    try:
+        url = f"https://efts.sec.gov/LATEST/search-index?q=%22{urllib.parse.quote(clean_name)}%22"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "BreachSpillover-OSINT/2.0 (investigator@breachspillover.org)",
+            "Accept": "application/json"
+        })
+        with urllib.request.urlopen(req, timeout=4.0) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            hits = data.get("hits", {}).get("hits", [])
+            for h in hits[:5]:
+                src = h.get("_source", {})
+                display_names = src.get("display_names", [])
+                form_type = src.get("form", "Executive Filing")
+                file_date = src.get("file_date", "")
+
+                matched_company = None
+                matched_person = None
+                for dn in display_names:
+                    dn_low = dn.lower()
+                    if all(p in dn_low for p in parts):
+                        matched_person = re.sub(r'\(CIK\s*\d+\)', '', dn).strip()
+                    elif any(w in dn_low for w in ["corp", "inc", "ltd", "co", "holdings", "group", "technologies"]):
+                        matched_company = re.sub(r'\(CIK\s*\d+\)', '', dn).strip()
+                    elif not matched_company and dn != matched_person:
+                        matched_company = re.sub(r'\(CIK\s*\d+\)', '', dn).strip()
+
+                if matched_company and (matched_person or any(p in str(display_names).lower() for p in parts)):
+                    clean_comp = re.sub(r'\s*\([A-Z0-9\s]+\)', '', matched_company).strip()
+                    return {
+                        "matched": True,
+                        "full_legal_name": matched_person.title() if matched_person else clean_name.title(),
+                        "company_name": clean_comp or "US Registered Corporation",
+                        "role": f"Corporate Officer / Reporting Owner (SEC Form {form_type})",
+                        "legal_form": "Public Corporation / Entity (SEC Registered)",
+                        "industry": "Commercial Enterprise",
+                        "sbi_code": "N/A",
+                        "address": "SEC Registered Corporate Footprint",
+                        "city": "United States",
+                        "postal_code": "N/A",
+                        "region": "North America",
+                        "country": "United States",
+                        "latitude": 38.8951,
+                        "longitude": -77.0364,
+                        "confidence_score": 0.95,
+                        "official_sources": ["US Securities and Exchange Commission (SEC EDGAR)"],
+                        "context_summary": f"Verified Corporate Officer at {clean_comp} in SEC EDGAR filing (Form {form_type}, {file_date}).",
+                        "co_partners": []
+                    }
+    except Exception:
+        pass
+    return None
 
 
 def query_uk_companies_house(target_name: str) -> Optional[Dict[str, Any]]:
@@ -49,22 +116,31 @@ def query_uk_companies_house(target_name: str) -> Optional[Dict[str, Any]]:
         officer_blocks = re.findall(r'<li class="type-officer"[\s\S]*?</li>', html)
         for b in officer_blocks[:3]:
             name_m = re.search(r'<a href="(/officers/[^"]+)"[^>]*>([\s\S]*?)</a>', b)
-            app_m = re.search(r'<dd[^>]*>([\s\S]*?)</dd>', b)
-            if name_m and app_m:
+            dds = [re.sub(r'<[^>]+>', '', dd).strip() for dd in re.findall(r'<dd[^>]*>([\s\S]*?)</dd>', b)]
+            if name_m and dds:
                 officer_name = re.sub(r'<[^>]+>', '', name_m.group(2)).strip()
-                company_text = re.sub(r'<[^>]+>', '', app_m.group(1)).strip()
+
+                company_text = "UK Registered Entity"
+                address_text = "Companies House Executive Footprint"
+                for dd_val in dds:
+                    if any(w in dd_val.upper() for w in ["LTD", "LIMITED", "LLP", "PLC", "INC", "CORP"]) or re.search(r'\(\d{6,8}\)', dd_val):
+                        company_text = dd_val
+                    elif any(w in dd_val.lower() for w in ["street", "road", "london", "lane", "avenue", "drive", "suite", "box"]):
+                        address_text = dd_val
+                    elif company_text == "UK Registered Entity" and len(dd_val) >= 4:
+                        company_text = dd_val
 
                 parts = clean_name.lower().split()
                 if all(p in officer_name.lower() for p in parts):
                     return {
                         "matched": True,
                         "full_legal_name": officer_name.title(),
-                        "company_name": company_text or "UK Registered Entity",
+                        "company_name": company_text,
                         "role": "Director / Executive Officer",
                         "legal_form": "Private Limited Company (Ltd)",
                         "industry": "Commercial Enterprise",
                         "sbi_code": "N/A",
-                        "address": "Companies House Executive Footprint",
+                        "address": address_text,
                         "city": "London / United Kingdom",
                         "postal_code": "N/A",
                         "region": "United Kingdom",
@@ -134,7 +210,7 @@ def extract_corporate_entity_with_ai(
         return None
 
     try:
-        from backend.ai_engine import call_groq_api, resolve_api_key
+        from backend.cardinal.llm import call_groq_api, resolve_api_key
         api_key = resolve_api_key("groq")
         if not api_key:
             return None
@@ -223,34 +299,83 @@ def query_corporate_registries(
     Executes universal corporate & chamber of commerce reconnaissance.
     Corroborates business partnerships, executive directorships, registered office footprints,
     and verified legal identities across all registered partners dynamically.
+    Fully multi-jurisdictional across US (SEC EDGAR), UK (Companies House),
+    EU (KvK, Handelsregister, Infogreffe), and Global registries.
     """
     anchors = anchors or {}
     clean_name = (anchors.get("known_name") or target_name or "").strip()
     cache_key = f"{clean_name.lower()}:{target_email.lower()}"
 
+    now = time.time()
     if cache_key in _CORP_CACHE:
-        return _CORP_CACHE[cache_key]
+        c_time, c_val = _CORP_CACHE[cache_key]
+        if (now - c_time) < _CORP_TTL_SECONDS:
+            return copy.deepcopy(c_val)
 
-    # 1. Live UK Companies House API & Director Search
-    uk_res = query_uk_companies_house(clean_name)
-    if uk_res:
-        _CORP_CACHE[cache_key] = uk_res
-        return uk_res
+    # Detect jurisdiction context
+    target_country = (anchors.get("known_country") or "").strip().lower()
+    email_tld = target_email.lower().split("@")[-1].split(".")[-1] if ("@" in target_email and "." in target_email) else ""
+    full_email_domain = target_email.lower().split("@")[-1] if "@" in target_email else ""
 
-    # 2. Dynamic Live Corporate Search Dork & AI Reasoning
+    is_uk = target_country in ["united kingdom", "uk", "great britain", "england", "scotland"] or email_tld in ["uk"] or full_email_domain.endswith(".co.uk")
+    is_us = target_country in ["united states", "usa", "us"] or email_tld in ["us", "gov", "mil"]
+    is_nl = target_country in ["netherlands", "holland", "nederland"] or email_tld in ["nl"]
+    is_de = target_country in ["germany", "deutschland", "austria", "switzerland"] or email_tld in ["de", "at", "ch"]
+    is_fr = target_country in ["france"] or email_tld in ["fr"]
+
+    # 1. Authoritative Register Lookups based on jurisdiction or global fallback
+    if is_uk:
+        uk_res = query_uk_companies_house(clean_name)
+        if uk_res:
+            _CORP_CACHE[cache_key] = (now, copy.deepcopy(uk_res))
+            return uk_res
+    elif is_us:
+        sec_res = query_sec_edgar_officers(clean_name)
+        if sec_res:
+            _CORP_CACHE[cache_key] = (now, copy.deepcopy(sec_res))
+            return sec_res
+    else:
+        # Check UK Companies House & US SEC EDGAR as primary authoritative open registers
+        uk_res = query_uk_companies_house(clean_name)
+        if uk_res:
+            _CORP_CACHE[cache_key] = (now, copy.deepcopy(uk_res))
+            return uk_res
+        sec_res = query_sec_edgar_officers(clean_name)
+        if sec_res:
+            _CORP_CACHE[cache_key] = (now, copy.deepcopy(sec_res))
+            return sec_res
+
+    # 2. Dynamic Live Corporate Search Dork & AI Reasoning (Jurisdiction-Aware)
     name_parts = [p for p in clean_name.split() if len(p) >= 2]
     if len(name_parts) >= 2:
         try:
             from backend.web_dork_recon import query_search_snippets
 
-            # Formulate targeted business registry queries
             anchor_city = anchors.get("known_city") or ""
-            dork_queries = [
-                f'"{clean_name}" (kvk OR "kamer van koophandel" OR handelsregister OR drimble OR oozo OR bedrijvenmonitor)',
-                f'"{clean_name}" (director OR "managing director" OR founder OR "co-founder" OR partner OR vennoot)'
-            ]
+            dork_queries = []
+
+            if is_nl:
+                dork_queries.append(f'"{clean_name}" (kvk OR "kamer van koophandel" OR handelsregister OR drimble OR oozo OR bedrijvenmonitor)')
+                dork_queries.append(f'"{clean_name}" (director OR "managing director" OR founder OR "co-founder" OR partner OR vennoot)')
+            elif is_uk:
+                dork_queries.append(f'"{clean_name}" ("companies house" OR "company director" OR endole OR "registered office")')
+                dork_queries.append(f'"{clean_name}" (director OR "managing director" OR founder OR "co-founder" OR partner)')
+            elif is_us:
+                dork_queries.append(f'"{clean_name}" ("sec.gov" OR "secretary of state" OR "division of corporations" OR opencorporates)')
+                dork_queries.append(f'"{clean_name}" (ceo OR founder OR "co-founder" OR "chief executive" OR "board of directors")')
+            elif is_de:
+                dork_queries.append(f'"{clean_name}" (handelsregister OR "unternehmensregister" OR "geschäftsführer" OR "north data")')
+                dork_queries.append(f'"{clean_name}" (vorstand OR inhaber OR gründer OR partner)')
+            elif is_fr:
+                dork_queries.append(f'"{clean_name}" (infogreffe OR "societe.com" OR pappers OR "registre du commerce")')
+                dork_queries.append(f'"{clean_name}" (directeur OR gérant OR fondateur OR président)')
+            else:
+                # Universal Cross-Border Corporate Dorking
+                dork_queries.append(f'"{clean_name}" (opencorporates OR "companies house" OR "handelsregister" OR "sec.gov" OR "company registration")')
+                dork_queries.append(f'"{clean_name}" (director OR "managing director" OR founder OR "co-founder" OR ceo OR partner OR executive)')
+
             if anchor_city:
-                dork_queries.insert(0, f'"{clean_name}" "{anchor_city}" (kvk OR bedrijf OR partner OR director)')
+                dork_queries.insert(0, f'"{clean_name}" "{anchor_city}" (company OR director OR partner OR founder OR kvk)')
 
             corp_snippets = []
             seen_urls = set()
@@ -267,7 +392,7 @@ def query_corporate_registries(
             if corp_snippets:
                 ai_corp = extract_corporate_entity_with_ai(clean_name, target_email, corp_snippets, anchors)
                 if ai_corp and ai_corp.get("matched"):
-                    _CORP_CACHE[cache_key] = ai_corp
+                    _CORP_CACHE[cache_key] = (now, copy.deepcopy(ai_corp))
                     return ai_corp
         except Exception:
             pass
@@ -276,12 +401,12 @@ def query_corporate_registries(
     try:
         site_corp = crawl_corporate_domain_team(target_email, clean_name)
         if site_corp and site_corp.get("matched"):
-            _CORP_CACHE[cache_key] = site_corp
+            _CORP_CACHE[cache_key] = (now, copy.deepcopy(site_corp))
             return site_corp
     except Exception:
         pass
 
-    _CORP_CACHE[cache_key] = None
+    _CORP_CACHE[cache_key] = (now, None)
     return None
 
 

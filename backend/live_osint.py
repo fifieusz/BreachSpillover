@@ -11,6 +11,8 @@ Connects authentic, publicly accessible intelligence dots across the open intern
 """
 
 import os
+import time
+import copy
 import urllib.request
 import urllib.parse
 import json
@@ -22,6 +24,13 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 
 import phonenumbers
 from phonenumbers import geocoder, carrier, PhoneNumberType
+from backend.identity_signals import is_domain_or_url
+
+# In-memory TTL cache for deep OSINT reports and probers
+_DEEP_OSINT_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_GIT_ARCHAEOLOGY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_OPENPGP_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+_GRAVATAR_CACHE: Dict[str, Tuple[float, Optional[Dict[str, Any]]]] = {}
 
 # Holehe OSINT Library Integration (Probes open registration endpoints across 120+ platforms)
 try:
@@ -145,9 +154,26 @@ def check_email_with_user_scanner(email: str, timeout: int = 10) -> List[Dict[st
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-def is_common_given_name(word: str) -> bool:
-    """Universally neutral name check: zero hardcoded dictionaries or cultural bias."""
+def is_common_given_name(word: str, target_name: Optional[str] = None) -> bool:
+    """
+    Checks if a word represents a common given name or matches the target's first name,
+    preventing vanity/namesake collisions from being probed as unique handles.
+    """
+    if not word:
+        return False
+    w = word.strip().lower()
+    if target_name:
+        parts = [p.lower() for p in re.findall(r'[a-zA-Z]+', target_name) if len(p) >= 2]
+        if parts and w == parts[0]:
+            return True
+    try:
+        from backend.onomastic_engine import GLOBAL_GIVEN_NAMES
+        if w in GLOBAL_GIVEN_NAMES:
+            return True
+    except Exception:
+        pass
     return False
+
 
 def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = None) -> List[str]:
     """
@@ -162,13 +188,19 @@ def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = 
     raw = (email_or_handle or "").strip().lower()
     local = raw.split("@")[0] if "@" in raw else raw
 
+    # Telecom / Phone targets do not have usernames or handles
+    if (raw.startswith("phone.") and raw.endswith("@osint.local")) or raw.startswith("+") or re.match(r'^phone\.\d+$', local):
+        return []
+
     candidates = []
 
     def add_candidate(cand: str):
         c = cand.strip(" .-_+")
-        if len(c) >= 3 and c.lower() not in [
-            "test", "admin", "null", "user", "root", "unknown", "none", "info", "mail", "contact"
-        ]:
+        c_low = c.lower()
+        if len(c) >= 3 and c_low not in [
+            "test", "admin", "null", "user", "root", "unknown", "none", "info", "mail", "contact",
+            "phone", "telecom", "carrier", "mobile", "cellular"
+        ] and not c_low.startswith("phone."):
             if c not in candidates:
                 candidates.append(c)
 
@@ -190,11 +222,7 @@ def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = 
             add_candidate(fn[0] + ln)
             add_candidate(fn[0] + "." + ln)
             add_candidate(fn[0] + "_" + ln)
-            add_candidate(ln + fn[0])
-            if len(fn) >= 3:
-                add_candidate(fn)
-            if len(ln) >= 3:
-                add_candidate(ln)
+            # Do NOT add bare fn or ln alone - standalone single names cause massive false positive vanity collisions
             # Check for birthyear or suffix digits in local handle (e.g. 95 from 3gbxdd or alex95)
             digits_in_local = re.findall(r'\d+', local)
             for d_str in digits_in_local:
@@ -236,19 +264,22 @@ def derive_candidate_handles(email_or_handle: str, target_name: Optional[str] = 
         add_candidate(first[0] + last)
         add_candidate(first + last[0])
         add_candidate(last + first[0])
-        if len(first) >= 3:
-            add_candidate(first)
-        if len(last) >= 3:
-            add_candidate(last)
+        # Do NOT add bare first or bare last alone - prevents generic word / surname collisions
 
     # 7. Universal username suffixes and prefixes
     for suf in ["_dev", "-dev", "dev", "_pro", "-pro", "pro", "_official", "official"]:
         if local.endswith(suf) and len(local) - len(suf) >= 3:
             add_candidate(local[:-len(suf)].rstrip("._-"))
 
-    for pre in ["the_", "the-", "the", "real_", "real-", "real", "iam_", "iam-", "iam"]:
+    for pre in ["the_", "the-", "the", "real_", "real-", "real", "iam_", "iam-", "iam", "x_", "x-"]:
         if local.startswith(pre) and len(local) - len(pre) >= 3:
             add_candidate(local[len(pre):].lstrip("._-"))
+
+    # Also if local starts with single 'x' + alphabetic word (e.g. xmister -> mister, xmister795 -> mister795 & mister)
+    if local.startswith("x") and len(local) > 4 and local[1].isalpha() and not local.startswith("xeon"):
+        add_candidate(local[1:])
+    if pure_word.startswith("x") and len(pure_word) > 4 and pure_word[1].isalpha() and not pure_word.startswith("xeon"):
+        add_candidate(pure_word[1:])
 
     # 8. Vanity doubled final consonant (common on competitive/gaming networks when primary handle is occupied)
     if len(local) >= 4 and local[-1].isalpha() and local[-1] not in "aeiou" and not local.endswith(local[-1] * 2):
@@ -302,7 +333,19 @@ def analyze_telecom_number(phone_raw: str, default_region: Optional[str] = None)
 
     intl_formatted = phonenumbers.format_number(parsed_num, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
     e164_formatted = phonenumbers.format_number(parsed_num, phonenumbers.PhoneNumberFormat.E164)
-    country_desc = geocoder.description_for_number(parsed_num, "en") or "Europe/International"
+    country_desc = geocoder.description_for_number(parsed_num, "en")
+    if not country_desc:
+        try:
+            from backend.telecom_recon import COUNTRY_CODE_MAP
+            iso_r = phonenumbers.region_code_for_number(parsed_num)
+            for pfx, c_info in COUNTRY_CODE_MAP.items():
+                if c_info.get("iso") == iso_r:
+                    country_desc = c_info.get("country")
+                    break
+        except Exception:
+            pass
+    if not country_desc:
+        country_desc = "Europe/International"
     carrier_name = carrier.name_for_number(parsed_num, "en") or "National Telecom Operator"
     
     num_type = phonenumbers.number_type(parsed_num)
@@ -335,16 +378,24 @@ def query_gravatar_profile(email: str) -> Optional[Dict[str, Any]]:
     Queries Gravatar's public REST API using the MD5 hash of the email address.
     """
     cleaned = email.strip().lower()
+    now = time.time()
+    from backend.cache_manager import is_cache_disabled
+    if not is_cache_disabled() and cleaned in _GRAVATAR_CACHE:
+        c_time, c_val = _GRAVATAR_CACHE[cleaned]
+        if now - c_time < 300.0:
+            return copy.deepcopy(c_val) if c_val else None
+
     email_hash = hashlib.md5(cleaned.encode("utf-8")).hexdigest()
     url = f"https://en.gravatar.com/{email_hash}.json"
 
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=3.5) as response:
+        with urllib.request.urlopen(req, timeout=2.5) as response:
             if response.status == 200:
                 data = json.loads(response.read().decode("utf-8"))
                 entry = (data.get("entry") or [{}])[0]
                 if not entry:
+                    _GRAVATAR_CACHE[cleaned] = (now, None)
                     return None
 
                 verified_accounts = []
@@ -358,7 +409,7 @@ def query_gravatar_profile(email: str) -> Optional[Dict[str, Any]]:
 
                 urls = [u.get("value") for u in entry.get("urls", []) if u.get("value")]
 
-                return {
+                res = {
                     "source": "Gravatar Global Profile",
                     "username": entry.get("preferredUsername"),
                     "display_name": entry.get("displayName"),
@@ -370,7 +421,13 @@ def query_gravatar_profile(email: str) -> Optional[Dict[str, Any]]:
                     "verified_accounts": verified_accounts,
                     "urls": urls
                 }
+                _GRAVATAR_CACHE[cleaned] = (now, copy.deepcopy(res))
+                return res
+            else:
+                _GRAVATAR_CACHE[cleaned] = (now, None)
+                return None
     except Exception:
+        _GRAVATAR_CACHE[cleaned] = (now, None)
         return None
 
 def get_github_headers(accept: str = "application/vnd.github.v3+json") -> Dict[str, str]:
@@ -382,7 +439,7 @@ def get_github_headers(accept: str = "application/vnd.github.v3+json") -> Dict[s
     token = os.getenv("GITHUB_TOKEN", "").strip()
     if not token:
         try:
-            from backend.ai_engine import load_dotenv
+            from backend.cardinal.llm import load_dotenv
             load_dotenv()
             token = os.getenv("GITHUB_TOKEN", "").strip()
         except Exception:
@@ -448,6 +505,13 @@ def query_git_commit_archaeology(email: str) -> Dict[str, Any]:
     Discovers author full names, handles, public repositories, and analyzes personal websites/CVs.
     """
     cleaned = email.strip().lower()
+    now = time.time()
+    from backend.cache_manager import is_cache_disabled
+    if not is_cache_disabled() and cleaned in _GIT_ARCHAEOLOGY_CACHE:
+        c_time, c_val = _GIT_ARCHAEOLOGY_CACHE[cleaned]
+        if now - c_time < 300.0:
+            return copy.deepcopy(c_val)
+
     url = f"https://api.github.com/search/commits?q=author-email:{urllib.parse.quote(cleaned)}"
     req = urllib.request.Request(url, headers=get_github_headers("application/vnd.github.cloak-preview"))
 
@@ -492,10 +556,10 @@ def query_git_commit_archaeology(email: str) -> Dict[str, Any]:
                         result["handles"].add(committer_login)
 
                 # For author_names, only consider as a handle if it has non-name pseudonym characteristics
-                # (e.g. has numbers, underscores, or is not a common human first name AND has no spaces)
+                # (e.g. has numbers, underscores, and is not a common human first name)
                 for name in result["author_names"]:
                     if " " not in name and re.match(r'^[a-zA-Z0-9_\-\.]{3,30}$', name) and not name.lower().endswith(('.com', '.org', '.net')):
-                        if not is_common_given_name(name) and (re.search(r'[\d_\-]', name) or len(result["author_logins"]) == 0):
+                        if not is_common_given_name(name) and re.search(r'[\d_\-]', name):
                             result["handles"].add(name)
 
                 for item in data.get("items", []):
@@ -546,28 +610,39 @@ def query_git_commit_archaeology(email: str) -> Dict[str, Any]:
             })
 
     candidate_fetches = []
-    for repo in sorted_repos[:4]:
+    for repo in sorted_repos[:2]:
         full_name = repo["full_name"]
-        # In personal portfolio repos (*.github.io), prioritize cv, index, resume, about
-        candidates = ["cv.html", "index.html", "resume.html", "about.html", "contact.html", "README.md"] if repo.get("is_portfolio") else ["README.md", "about.md", "contact.html"]
-        for branch in ["main", "master"]:
-            for candidate in candidates:
-                raw_url = f"https://raw.githubusercontent.com/{full_name}/{branch}/{candidate}"
-                candidate_fetches.append((raw_url, full_name, candidate))
+        candidates = ["index.html", "README.md"] if repo.get("is_portfolio") else ["README.md"]
+        for candidate in candidates:
+            raw_url = f"https://raw.githubusercontent.com/{full_name}/main/{candidate}"
+            candidate_fetches.append((raw_url, full_name, candidate))
 
     def fetch_candidate(item):
         raw_url, full_name, candidate = item
         try:
             raw_req = urllib.request.Request(raw_url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(raw_req, timeout=2.5) as raw_res:
+            with urllib.request.urlopen(raw_req, timeout=1.5) as raw_res:
                 if raw_res.status == 200:
                     return (full_name, candidate, raw_res.read().decode("utf-8", errors="ignore"))
         except Exception:
             pass
         return None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as ex:
-        fetched_docs = [r for r in ex.map(fetch_candidate, candidate_fetches[:48]) if r]
+    fetched_docs = []
+    if candidate_fetches:
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        try:
+            fut_map = [ex.submit(fetch_candidate, it) for it in candidate_fetches[:4]]
+            done, _ = concurrent.futures.wait(fut_map, timeout=2.0)
+            for f in done:
+                try:
+                    r = f.result()
+                    if r:
+                        fetched_docs.append(r)
+                except Exception:
+                    pass
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
 
     def is_fictional_or_dummy_phone(intl_num: str) -> bool:
         if not intl_num:
@@ -679,6 +754,7 @@ def query_git_commit_archaeology(email: str) -> Dict[str, Any]:
             if not any(t["event"] == tm["event"] for t in result["timeline"]):
                 result["timeline"].append(tm)
 
+    _GIT_ARCHAEOLOGY_CACHE[cleaned] = (now, copy.deepcopy(result))
     return result
 
 def extract_semantic_entities(text: str) -> Dict[str, Any]:
@@ -1130,6 +1206,13 @@ def query_openpgp_keys(email: str) -> List[Dict[str, Any]]:
     Extracts key IDs, fingerprints, algorithms, creation timestamps, real names, and alternate inboxes.
     """
     cleaned_email = email.strip().lower()
+    now = time.time()
+    from backend.cache_manager import is_cache_disabled
+    if not is_cache_disabled() and cleaned_email in _OPENPGP_CACHE:
+        c_time, c_val = _OPENPGP_CACHE[cleaned_email]
+        if now - c_time < 300.0:
+            return copy.deepcopy(c_val)
+
     results = []
     seen_fps: Set[str] = set()
 
@@ -1212,6 +1295,7 @@ def query_openpgp_keys(email: str) -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
+    _OPENPGP_CACHE[cleaned_email] = (now, copy.deepcopy(results))
     return results
 
 # Comprehensive WhatBreach-inspired disposable and burner mailbox registry (500+ coverage via domains and patterns)
@@ -1236,16 +1320,20 @@ DISPOSABLE_DOMAINS: Set[str] = {
     "meltmail.com", "filzmail.com", "trashmail.at", "trashmail.io"
 }
 
+_KICKBOX_CACHE: Dict[str, bool] = {}
+
 def check_disposable_email(domain: str) -> Dict[str, Any]:
     """
-    WhatBreach-Inspired Disposable & Burner Email Engine:
+    WhatBreach & Kickbox-Inspired Disposable & Burner Email Engine:
     Detects throwaway, 10-minute, and disposable mailboxes used for evasion or burner identities.
+    Combines static fast-path hash set with live Kickbox Open Disposable API queries.
     """
     if not domain:
         return {"is_disposable": False, "domain": "", "provider": None, "risk_rating": "LOW", "details": ""}
     
     clean_dom = domain.strip().lower().lstrip("@")
     is_disp = clean_dom in DISPOSABLE_DOMAINS
+    provider_name = f"{clean_dom.split('.')[0].capitalize()} Burner Network"
     
     # Substring heuristics for unlisted ephemeral domains
     if not is_disp:
@@ -1253,11 +1341,31 @@ def check_disposable_email(domain: str) -> Dict[str, Any]:
         if any(tok in clean_dom for tok in burner_tokens):
             is_disp = True
 
+    # Real-time Kickbox Open Disposable API check for unlisted domains
+    if not is_disp and "." in clean_dom:
+        common_majors = {"gmail.com", "googlemail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "proton.me", "protonmail.com", "cybercorp.io"}
+        if clean_dom not in common_majors:
+            if clean_dom in _KICKBOX_CACHE:
+                is_disp = _KICKBOX_CACHE[clean_dom]
+            else:
+                try:
+                    kb_url = f"https://open.kickbox.com/v1/disposable/{urllib.parse.quote(clean_dom)}"
+                    kb_req = urllib.request.Request(kb_url, headers={"User-Agent": "BreachSpillover-OSINT/1.0"})
+                    with urllib.request.urlopen(kb_req, timeout=2.0) as kb_resp:
+                        if kb_resp.status == 200:
+                            kb_data = json.loads(kb_resp.read().decode("utf-8", errors="ignore"))
+                            is_disp = bool(kb_data.get("disposable"))
+                            _KICKBOX_CACHE[clean_dom] = is_disp
+                            if is_disp:
+                                provider_name = "Kickbox Verified Disposable Burner"
+                except Exception:
+                    pass
+
     if is_disp:
         return {
             "is_disposable": True,
             "domain": clean_dom,
-            "provider": f"{clean_dom.split('.')[0].capitalize()} Burner Network",
+            "provider": provider_name,
             "risk_rating": "HIGH_EVASION_RISK",
             "details": f"Target domain '{clean_dom}' is an ephemeral throwaway inbox provider. Typically utilized to bypass verification or conceal primary identities."
         }
@@ -1757,10 +1865,35 @@ def query_domain_infrastructure(email: str) -> Optional[Dict[str, Any]]:
     if classification == "ENTERPRISE_CUSTOM_DOMAIN":
         spoofable = dmarc_policy in ["MISSING", "NONE (Monitor Only)"]
 
+    # 3. Resolve Primary A record & IP-API Geolocation/ASN
+    a_records = resolve_doh(domain, "A")
+    primary_ip = a_records[0] if a_records else None
+    ip_geo = {}
+    if primary_ip and re.match(r'^\d+\.\d+\.\d+\.\d+$', primary_ip):
+        try:
+            ip_url = f"http://ip-api.com/json/{primary_ip}"
+            ip_req = urllib.request.Request(ip_url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(ip_req, timeout=2.0) as r_ip:
+                if r_ip.status == 200:
+                    raw_ip = json.loads(r_ip.read().decode("utf-8", errors="ignore"))
+                    if raw_ip.get("status") == "success":
+                        ip_geo = {
+                            "ip": primary_ip,
+                            "isp": raw_ip.get("isp"),
+                            "org": raw_ip.get("org"),
+                            "asn": raw_ip.get("as"),
+                            "country": raw_ip.get("country"),
+                            "city": raw_ip.get("city")
+                        }
+        except Exception:
+            pass
+
     return {
         "domain": domain,
         "classification": classification,
         "provider_name": CONSUMER_PROVIDERS.get(domain, f"{domain} Mail Server"),
+        "primary_ip": primary_ip,
+        "hosting_intel": ip_geo if ip_geo else None,
         "mx_servers": [mx.split()[-1].rstrip(".") for mx in mx_records[:3]],
         "spf_status": "CONFIGURED" if spf_record != "MISSING" else "MISSING",
         "dmarc_policy": dmarc_policy,
@@ -1823,10 +1956,15 @@ def query_crtsh_subdomains(domain: str) -> List[Dict[str, Any]]:
     and concurrent Google DoH probes for high-risk corporate login gateways.
     Classifies portals into VPN, SSO/IAM, Code Repositories, Webmail, and Admin Portals.
     """
-    if not domain or "." not in domain:
+    clean_dom = domain.strip().lower().lstrip("@")
+    freemails = {
+        "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "proton.me",
+        "protonmail.com", "icloud.com", "aol.com", "mail.com", "zoho.com",
+        "live.com", "msn.com", "osint.local", "yandex.com", "gmx.com"
+    }
+    if not domain or "." not in domain or clean_dom in freemails:
         return []
 
-    clean_dom = domain.strip().lower().lstrip("@")
     discovered_hosts = set()
 
     # 1. High-value Corporate Entrypoint categories
@@ -2599,6 +2737,8 @@ def extract_candidate_aliases_from_profile(profile: Dict[str, Any], known_handle
             return
         if cleaned.isdigit():
             return
+        if is_domain_or_url(cleaned):
+            return
         if c_low in NON_ALIAS_WORDS or c_low in seen:
             return
         if is_common_given_name(c_low) and len(cleaned) < 7:
@@ -2636,8 +2776,8 @@ def extract_candidate_aliases_from_profile(profile: Dict[str, Any], known_handle
     ])
 
     if text_corpus:
-        # Match @mentions: e.g. @fifieusz, @false
-        for m in re.finditer(r'@([a-zA-Z0-9_\-\.]{3,25})', text_corpus):
+        # Match @mentions: e.g. @sazeku (never match email domains like user@office365.com)
+        for m in re.finditer(r'(?<![a-zA-Z0-9._%+-])@([a-zA-Z0-9_\-]{3,25})(?!\.[a-zA-Z])', text_corpus):
             add_candidate(m.group(1), "bio_mention")
         # Match social URLs: e.g. twitter.com/fifi, steamcommunity.com/id/fifieusz, t.me/xyz
         for m in re.finditer(r'(?:twitter\.com|x\.com|github\.com|t\.me|instagram\.com|twitch\.tv|linktr\.ee)/([a-zA-Z0-9_\-\.]{3,25})', text_corpus, re.I):
@@ -2667,20 +2807,36 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
     """
     anchors = anchors or {}
     clean_email = email.strip().lower()
-    email_local = clean_email.split("@")[0] if "@" in clean_email else clean_email
-    clean_user = (anchors.get("known_username") or "").strip() or email_local
     known_name = (anchors.get("known_name") or "").strip()
+    cache_key = f"{clean_email}::{known_name}::{(anchors.get('known_username') or '').strip()}"
+    now = time.time()
+    from backend.cache_manager import is_cache_disabled
+    if not is_cache_disabled() and cache_key in _DEEP_OSINT_CACHE:
+        c_time, c_val = _DEEP_OSINT_CACHE[cache_key]
+        if now - c_time < 300.0:
+            return copy.deepcopy(c_val)
+
+    is_phone_target = bool(
+        (clean_email.startswith("phone.") and clean_email.endswith("@osint.local"))
+        or clean_email.startswith("+")
+        or (anchors and anchors.get("known_phone") and clean_email.endswith("@osint.local"))
+    )
+
+    email_local = clean_email.split("@")[0] if "@" in clean_email else clean_email
+    clean_user = (anchors.get("known_username") or "").strip() if is_phone_target else ((anchors.get("known_username") or "").strip() or email_local)
+    if clean_user.lower() in ["phone", "telecom", "mobile", "cellular"] or clean_user.lower().startswith("phone."):
+        clean_user = ""
     anchor_city = (anchors.get("known_city") or "").strip()
-    derived_candidates = derive_candidate_handles(clean_email, target_name=known_name)
+    derived_candidates = [] if is_phone_target else derive_candidate_handles(clean_email, target_name=known_name)
 
     # Multilingual AI Onomastic & Identity Decomposition
     ident_info = {}
     try:
         from backend.identity_decomposer import decompose_target_identity
         ident_info = decompose_target_identity(clean_email, raw_name=anchors.get("known_name"))
-        if ident_info:
+        if ident_info and not is_phone_target:
             for uh in ident_info.get("candidate_usernames", []):
-                if uh and uh not in derived_candidates:
+                if uh and uh not in derived_candidates and uh.lower() not in ["phone", "telecom"]:
                     derived_candidates.append(uh)
     except Exception as e:
         print(f"[!] Target identity decomposition error: {e}")
@@ -2716,14 +2872,48 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
         "anchors_correlated": {}
     }
 
-    # 1. Execute Git Commit Archaeology, User-Scanner & Holehe concurrently in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
-        f_git = ex.submit(query_git_commit_archaeology, clean_email)
-        f_uscan = ex.submit(check_email_with_user_scanner, clean_email, 8)
-        f_hole = ex.submit(check_email_with_holehe, clean_email)
-        git_intel = f_git.result()
-        user_scanner_matches = f_uscan.result()
-        holehe_matches = f_hole.result()
+    if is_phone_target:
+        # Direct telecom phone reconnaissance
+        phone_target_str = (anchors.get("known_phone") or "").strip()
+        if not phone_target_str and clean_email.startswith("phone."):
+            phone_target_str = "+" + clean_email.split("@")[0].replace("phone.", "")
+        if phone_target_str:
+            telecom_c = analyze_telecom_number(phone_target_str)
+            if telecom_c:
+                telecom_c["source"] = "Telecom Carrier Network Routing"
+                telecom_c["confidence"] = 1.0
+                osint_report["discovered_phones"].append(telecom_c)
+                if telecom_c.get("country"):
+                    osint_report["discovered_locations"].add(telecom_c["country"])
+                digits_only = re.sub(r'\D', '', telecom_c.get("e164") or phone_target_str)
+                osint_report["osint_dorks"].extend([
+                    f'"{telecom_c.get("international", phone_target_str)}"',
+                    f'"{digits_only}"',
+                    f'"{phone_target_str}"'
+                ])
+                if telecom_c.get("carrier"):
+                    osint_report["workplace"].append({
+                        "company": telecom_c["carrier"],
+                        "role": f"Subscriber Line ({telecom_c.get('line_type', 'Cellular')})",
+                        "status": "ACTIVE_CARRIER"
+                    })
+        _LIVE_OSINT_CACHE[clean_email] = (now, copy.deepcopy(osint_report))
+        return osint_report
+    else:
+        # 1. Execute Git Archaeology, User-Scanner, Holehe, Gravatar, PGP & Domain Infra concurrently in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+            f_git = ex.submit(query_git_commit_archaeology, clean_email)
+            f_uscan = ex.submit(check_email_with_user_scanner, clean_email, 2.5)
+            f_hole = ex.submit(check_email_with_holehe, clean_email)
+            f_grav = ex.submit(query_gravatar_profile, clean_email)
+            f_pgp = ex.submit(query_openpgp_keys, clean_email)
+            f_domain = ex.submit(query_domain_infrastructure, clean_email)
+            git_intel = f_git.result()
+            user_scanner_matches = f_uscan.result()
+            holehe_matches = f_hole.result()
+            grav = f_grav.result()
+            pgp = f_pgp.result()
+            domain_infra = f_domain.result()
 
     osint_report["education"] = git_intel.get("education", [])
     osint_report["workplace"] = git_intel.get("workplace", [])
@@ -2899,8 +3089,8 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
     # 2b. Direct High-Yield REST & XML API Probing (Chess.com, Steam, Roblox, GitHub, GitLab, DockerHub, Duolingo, Keybase, Telegram)
     try:
         from backend.platform_probes import probe_all_direct_platforms
-        probe_targets = list(initial_handles)[:8]
-        direct_hits = probe_all_direct_platforms(probe_targets)
+        probe_targets = [h for h in initial_handles if h.lower() not in ["phone", "telecom", "mobile", "cellular", "target"] and not h.lower().startswith("phone.")][:3]
+        direct_hits = probe_all_direct_platforms(probe_targets) if (probe_targets and not is_phone_target) else []
         for dhit in direct_hits:
             plat = dhit.get("platform", "Platform")
             h = dhit.get("handle")
@@ -2913,11 +3103,24 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
             loc = re.sub(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55\u203c-\u3299]', '', str(loc or '')).strip() or None
 
             if r_name and len(r_name) > 2 and not is_common_given_name(r_name):
-                # Only add candidate name if it shares token overlap with known names/email or git author names
                 cand_lower = r_name.lower()
                 clean_email_user = clean_email.lower().split('@')[0]
                 name_tokens = [t for t in re.split(r'[^a-z0-9]', clean_email_user) if len(t) >= 3]
-                if any(t in cand_lower for t in name_tokens) or any(t in cand_lower for t in str(anchors.get("known_name") or "").lower().split()):
+                is_pseudo = bool(ident_info.get("is_pseudonym", False))
+
+                # Check if handle is an exact match for target email local part or primary handle
+                is_direct_handle_match = bool(
+                    h and h.lower() in [clean_email_user, clean_user.lower(), str(ident_info.get("primary_handle") or "").lower()]
+                )
+                # Authentic human name candidate: 2+ words, letters only, no digits
+                is_authentic_human_name = bool(
+                    " " in r_name and len(r_name.split()) >= 2 and not any(ch.isdigit() for ch in r_name) and len(r_name) >= 5
+                )
+
+                # Overlap with email tokens, known name, or direct handle match for pseudonyms
+                shares_tokens = any(t in cand_lower for t in name_tokens) or any(t in cand_lower for t in str(anchors.get("known_name") or "").lower().split())
+
+                if shares_tokens or (is_pseudo and is_direct_handle_match and is_authentic_human_name):
                     osint_report["discovered_names"].add(r_name)
                     if not osint_report.get("primary_name") or (" " in r_name and " " not in osint_report["primary_name"]):
                         osint_report["primary_name"] = r_name
@@ -2998,11 +3201,30 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
                         "tie_type": "UNCORROBORATED_HANDLE_CANDIDATE",
                         "tie_badge": "[CANDIDATE: UNCORROBORATED]"
                     })
+
+            # Ingest cryptographic cross-platform proofs (e.g. Keybase proofs -> Twitter, GitHub, Reddit, HackerNews)
+            for li in dhit.get("linked_identities", []):
+                li_plat = (li.get("platform") or "Web").capitalize()
+                li_h = li.get("handle")
+                li_u = li.get("url")
+                if li_h and len(li_h) >= 2:
+                    osint_report["discovered_handles"].add(li_h)
+                if li_u and not any(dp.get("url") == li_u for dp in osint_report.get("discovered_profiles", [])):
+                    osint_report.setdefault("discovered_profiles", []).append({
+                        "platform": li_plat,
+                        "handle": li_h,
+                        "url": li_u,
+                        "context": f"Cryptographically attested identity link from Keybase (@{h})",
+                        "confidence": 0.95,
+                        "source": "Keybase Cryptographic Proof",
+                        "is_verified": True,
+                        "tie_type": "CRYPTOGRAPHIC_PROOF_LINK",
+                        "tie_badge": "[TIED: CRYPTOGRAPHIC PROOF]"
+                    })
     except Exception as e:
         print(f"[!] Direct platform probing error: {e}")
 
-    # 3. Query Gravatar
-    grav = query_gravatar_profile(clean_email)
+    # 3. Process Pre-fetched Gravatar Intelligence
     if grav:
         osint_report["gravatar"] = grav
         if grav.get("username"):
@@ -3019,8 +3241,12 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
             "name": grav.get("display_name"),
             "handle": grav.get("username"),
             "url": grav.get("profile_url"),
-            "context": f"Public profile located. Bio: '{grav.get('about') or 'N/A'}'",
-            "location": grav.get("location")
+            "context": f"Public Gravatar profile authenticated via email hash. Bio: '{grav.get('about') or 'N/A'}' [TIED: EMAIL VERIFIED]",
+            "location": grav.get("location"),
+            "is_email_bound": True,
+            "is_verified": True,
+            "confidence": 0.98,
+            "tie_badge": "[TIED: EMAIL VERIFIED]",
         })
 
         for acc in grav.get("verified_accounts", []):
@@ -3031,8 +3257,7 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
                 "context": f"Verified linked account on {acc.get('domain')}"
             })
 
-    # 3. Query OpenPGP Keys
-    pgp = query_openpgp_keys(clean_email)
+    # 3. Process Pre-fetched OpenPGP Keys
     if pgp:
         osint_report["pgp_keys"] = pgp
         for k in pgp:
@@ -3048,8 +3273,7 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
                     if len(cand_h) >= 3:
                         osint_report["discovered_handles"].add(cand_h)
 
-    # 3b. Query Domain Infrastructure & Mail Routing Security (DNS DoH)
-    domain_infra = query_domain_infrastructure(clean_email)
+    # 3b. Process Pre-fetched Domain Infrastructure & Mail Routing Security (DNS DoH)
     if domain_infra:
         osint_report["domain_infrastructure"] = domain_infra
 
@@ -3287,6 +3511,26 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
     for cand in derived_candidates:
         register_candidate_handle(cand, "email_heuristic")
 
+    # Filter out candidate handles that are bare given names, bare family names, or domains
+    effective_name = (best_name or known_name or "").strip()
+    target_given_name = (effective_name.split()[0].lower() if " " in effective_name else "").strip()
+    target_family_name = (effective_name.split()[-1].lower() if " " in effective_name else "").strip()
+
+    filtered_probe_handle_dict = {}
+    for h_cand, prov in probe_handle_dict.items():
+        h_low = h_cand.lower()
+        if is_domain_or_url(h_low):
+            continue
+        # Never probe standalone first or last names alone without digits/pseudonym markers
+        if target_given_name and h_low == target_given_name:
+            continue
+        if target_family_name and h_low == target_family_name:
+            continue
+        if is_common_given_name(h_low, effective_name) and not re.search(r'[\d_\-]', h_cand):
+            continue
+        filtered_probe_handle_dict[h_cand] = prov
+    probe_handle_dict = filtered_probe_handle_dict
+
     # Prioritize handles by provenance rank and length
     sorted_candidate_handles = sorted(
         probe_handle_dict.keys(), 
@@ -3470,48 +3714,65 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
                     ):
                         osint_report["suspected_profiles"].append(p)
 
-    # Hop 2: Recursive Multi-Hop Identity Expansion
+    # Hop 2: Recursive Multi-Hop Identity Expansion (Concurrent)
     # Probes newly harvested candidate aliases across gaming, developer, and social platforms
     if discovered_aliases_list:
-        for da in discovered_aliases_list[:4]:  # Cap at top 4 recursive aliases to keep scan snappy (<3s)
-            r_alias = da["alias"]
-            r_src_plat = da["source_platform"].lower()
-            r_src_handle = da["source_handle"]
-            r_rel = da["relationship"]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as hop2_ex:
+            hop2_map = {hop2_ex.submit(check_platform_footprint, da["alias"], include_wmn=False): da for da in discovered_aliases_list[:3]}
+            for fut in concurrent.futures.as_completed(hop2_map):
+                da = hop2_map[fut]
+                r_alias = da["alias"]
+                r_src_plat = da["source_platform"].lower()
+                r_src_handle = da["source_handle"]
+                r_rel = da["relationship"]
+                try:
+                    r_probes = fut.result()
+                except Exception:
+                    r_probes = []
+                for rp in r_probes:
+                    rp_plat_low = rp.get("platform", "").lower()
+                    rp_h_low = (rp.get("handle") or "").strip().lower()
+                    ver_handles = get_verified_handles_by_platform()
 
-            r_probes = check_platform_footprint(r_alias, include_wmn=False)
-            for rp in r_probes:
-                rp_plat_low = rp.get("platform", "").lower()
-                rp_h_low = (rp.get("handle") or "").strip().lower()
-                ver_handles = get_verified_handles_by_platform()
+                    # 1. Never probe or record candidate on the platform from which the alias was harvested
+                    # (e.g. an in-game display name from a platform should never re-probe that platform)
+                    if rp_plat_low == r_src_plat:
+                        continue
 
-                # 1. Never probe or record candidate on the platform from which the alias was harvested
-                # (e.g. an in-game display name from a platform should never re-probe that platform)
-                if rp_plat_low == r_src_plat:
-                    continue
+                    # 2. Never probe or record candidate on a platform that already has a verified profile
+                    # (e.g. platform is already verified with an authentic account, so secondary persona probes are suppressed)
+                    if rp_plat_low in ver_handles:
+                        continue
 
-                # 2. Never probe or record candidate on a platform that already has a verified profile
-                # (e.g. platform is already verified with an authentic account, so secondary persona probes are suppressed)
-                if rp_plat_low in ver_handles:
-                    continue
+                    is_acc, r_conf, r_reason, r_ver = corroborate_candidate_profile(rp, truth_corpus, "persona_pivot")
+                    if is_acc:
+                        rp["url"] = rp.get("profile_url") or rp.get("url")
+                        rp["profile_url"] = rp["url"]
+                        pivot_desc = f"Discovered via cross-platform alias pivot from {da['source_platform']} (@{r_src_handle} -> '{r_alias}' [{r_rel.replace('_', ' ')}])"
 
-                is_acc, r_conf, r_reason, r_ver = corroborate_candidate_profile(rp, truth_corpus, "persona_pivot")
-                if is_acc:
-                    rp["url"] = rp.get("profile_url") or rp.get("url")
-                    rp["profile_url"] = rp["url"]
-                    rp["confidence"] = r_conf
-                    rp["is_verified"] = r_ver
-                    rp["is_suspected"] = not r_ver
-                    pivot_desc = f"Discovered via cross-platform alias pivot from {da['source_platform']} (@{r_src_handle} -> '{r_alias}' [{r_rel.replace('_', ' ')}])"
-                    rp["context"] = f"{pivot_desc}: {rp.get('context', '')}"
-                    rp["corroboration_note"] = f"{pivot_desc} • {r_reason}"
+                        # Secondary persona probes (e.g. Steam in-game persona 'Poes') are inherently uncorroborated
+                        # alias expansions across third-party platforms. They MUST NOT be classified as verified
+                        # unless they match the target's full multi-token legal name or verified email.
+                        has_full_name_binding = False
+                        rp_name = (rp.get("name") or rp.get("real_name") or "").lower()
+                        rp_tokens = set(re.findall(r'[a-zA-Z]{3,}', rp_name))
+                        if len(rp_tokens & truth_corpus.get("names", set())) >= 2:
+                            has_full_name_binding = True
 
-                    if r_ver:
-                        if not any((dp.get("url") == rp["url"] or dp.get("profile_url") == rp["url"]) for dp in osint_report["discovered_profiles"]):
-                            osint_report["discovered_profiles"].append(rp)
-                    else:
-                        if not any((sp.get("url") == rp["url"] or sp.get("profile_url") == rp["url"]) for sp in osint_report["suspected_profiles"]):
-                            osint_report["suspected_profiles"].append(rp)
+                        strictly_verified = bool(r_ver and (has_full_name_binding or rp.get("is_email_bound")))
+                        rp["is_verified"] = strictly_verified
+                        rp["is_suspected"] = not strictly_verified
+                        rp["confidence"] = r_conf if strictly_verified else min(0.65, r_conf)
+                        rp["context"] = f"{pivot_desc}: {rp.get('context', '')}"
+                        rp["corroboration_note"] = f"{pivot_desc} • {r_reason}"
+
+                        if strictly_verified:
+                            if not any((dp.get("url") == rp["url"] or dp.get("profile_url") == rp["url"]) for dp in osint_report["discovered_profiles"]):
+                                osint_report["discovered_profiles"].append(rp)
+                        else:
+                            rp["context"] = f"Candidate account matching secondary persona '@{rp.get('handle')}'. Common alias without direct email or full-name binding; quarantined in candidate ledger."
+                            if not any((sp.get("url") == rp["url"] or sp.get("profile_url") == rp["url"]) for sp in osint_report["suspected_profiles"]):
+                                osint_report["suspected_profiles"].append(rp)
 
     osint_report["discovered_aliases"] = discovered_aliases_list
 
@@ -3575,7 +3836,7 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
 
     # 7. High-Reasoning AI Candidate Verification & Quarantine Pass (Groq gpt-oss-120b / Gemini Flash)
     try:
-        from backend.ai_correlator import ai_verify_and_quarantine_candidates
+        from backend.cardinal.arbiter import ai_verify_and_quarantine_candidates
         auth_handles = list(git_intel.get("author_logins", set())) or list(git_intel.get("handles", set()))
         target_info = {
             "email": clean_email,
@@ -3602,4 +3863,5 @@ def execute_deep_live_osint(email: str, anchors: Optional[Dict[str, str]] = None
     osint_report["discovered_names"] = list(osint_report["discovered_names"])
     osint_report["discovered_locations"] = list(osint_report["discovered_locations"])
 
+    _DEEP_OSINT_CACHE[cache_key] = (now, copy.deepcopy(osint_report))
     return osint_report

@@ -1,3 +1,4 @@
+import re
 from typing import List, Dict, Any, Optional
 from backend.masking import (
     mask_email, mask_name, mask_password, mask_phone,
@@ -64,6 +65,33 @@ HUB_STYLES = {
     }
 }
 
+def stamp_graph_persona_ids(nodes: List[Dict[str, Any]], pivots: Optional[List[Dict[str, Any]]]) -> None:
+    """
+    Copies entity-resolution persona attribution onto graph nodes (in place).
+    Candidate cluster hubs/profiles carry their `cluster_id`; pivot-derived
+    nodes inherit the `persona_id` of the pivot whose value they display.
+    Nodes with no attribution (identity centre, provenance hubs, breaches)
+    are shared context and remain unstamped.
+    """
+    value_to_persona: Dict[str, str] = {}
+    for piv in pivots or []:
+        pid = piv.get("persona_id") or piv.get("cluster_id")
+        val = str(piv.get("pivot_value") or "").strip()
+        if pid and val:
+            value_to_persona.setdefault(val, pid)
+    for node in nodes:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        pid = data.get("cluster_id")
+        if not pid:
+            for key in ("value", "raw_value", "pivot_value"):
+                v = str(data.get(key) or "").strip()
+                if v and v in value_to_persona:
+                    pid = value_to_persona[v]
+                    break
+        if pid:
+            node["persona_id"] = pid
+            data["persona_id"] = pid
+
 def build_identity_graph(
     employee: Dict[str, Any],
     leaks: List[Dict[str, Any]],
@@ -72,7 +100,8 @@ def build_identity_graph(
     footprints: List[Dict[str, Any]],
     relatives: List[Dict[str, Any]],
     audit_mode: bool = True,
-    cross_correlations: Optional[Dict[str, Any]] = None
+    cross_correlations: Optional[Dict[str, Any]] = None,
+    candidate_clusters: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Transforms relational exposure data into Vis.js compatible graph nodes and edges.
@@ -82,6 +111,7 @@ def build_identity_graph(
       3. hub_accounts: Real Web & Cloud Registrations (Holehe / OSINT probes)
       4. hub_telecom: International Telecom Profiling (E.164, Carriers)
       5. hub_geo: Physical & Residential Geospatial Coordinates
+      6. candidate_clusters: Disambiguated Personas & Namesake Candidate Branches
     """
     nodes = []
     edges = []
@@ -238,7 +268,7 @@ def build_identity_graph(
         style = HUB_STYLES["breaches"]
         nodes.append({
             "id": hub_breaches_id,
-            "label": f"[PROVENANCE HUB: BREACHES]\nThreat Intelligence Ledger\n{len(leaks)} Verified Incidents",
+            "label": f"[HUB: BREACHES] ({len(leaks)})\nThreat Incidents",
             "title": "Categorical Hub: Exfiltrated dark web dumps, threat actor leaks, and active infostealer C2 logs.",
             "group": "hub_breaches",
             "category": "breaches",
@@ -267,13 +297,15 @@ def build_identity_graph(
         for leak in displayed_leaks:
             leak_node_id = f"leak_{leak['id']}"
             is_stealer = str(leak["leak_type"]).upper() == "INFOSTEALER"
-            leak_header = "[INFOSTEALER MALWARE]" if is_stealer else "[DATABASE BREACH]"
+            leak_header = "[STEALER]" if is_stealer else "[BREACH]"
+            leak_name = leak["leak_name"]
+            leak_name_short = leak_name[:24] + "..." if len(leak_name) > 26 else leak_name
             bg_color = "#180c10" if is_stealer else "#191209"
             border_color = "#f43f5e" if is_stealer else "#f59e0b"
 
             nodes.append({
                 "id": leak_node_id,
-                "label": f"{leak_header}\n{leak['leak_name']}\nDate: {leak.get('breach_date', 'N/A')}",
+                "label": f"{leak_header} {leak_name_short}\nDate: {leak.get('breach_date', 'N/A')}",
                 "title": f"Incident: {leak['leak_name']}\nSeverity: {leak.get('severity', 'HIGH')}\nType: {leak.get('leak_type', 'BREACH')}",
                 "group": "leak",
                 "category": "breaches",
@@ -356,11 +388,14 @@ def build_identity_graph(
             is_corp = bool(cred.get("is_corporate_password_match"))
 
             pwd_hash = cred.get("password_hash") or ""
-            cred_label = f"[COMPROMISED PASSWORD]\nPassword: {masked_pwd}" if masked_pwd else (f"[PASSWORD HASH]\n{pwd_hash}" if pwd_hash else "[CREDENTIAL EXFILTRATED]")
+            short_pwd = (masked_pwd[:16] + "...") if masked_pwd and len(masked_pwd) > 18 else masked_pwd
+            short_hash = (pwd_hash[:16] + "...") if pwd_hash and len(pwd_hash) > 18 else pwd_hash
+            cred_label = f"[PASSWORD] {short_pwd}" if short_pwd else (f"[HASH] {short_hash}" if short_hash else "[CREDENTIAL]")
             if cred.get("domain_compromised"):
-                cred_label += f"\nDomain: {cred['domain_compromised']}"
+                dom_short = cred['domain_compromised'][:20] + "..." if len(cred['domain_compromised']) > 22 else cred['domain_compromised']
+                cred_label += f"\nDomain: {dom_short}"
             if is_corp:
-                cred_label += "\n[CORPORATE MATCH: CRITICAL]"
+                cred_label += "\n[CORP MATCH]"
 
             nodes.append({
                 "id": cred_node_id,
@@ -408,14 +443,15 @@ def build_identity_graph(
         for lp in leak_pivots[:8]:
             pivot_node_id = f"pivot_{lp['id']}"
             masked_val = mask_pivot_value(lp["pivot_type"], lp["pivot_value"], audit_mode)
+            short_val = masked_val[:22] + "..." if len(masked_val) > 24 else masked_val
             leak_ref_id = f"leak_{lp['source_leak_id']}"
 
             p_type = lp["pivot_type"].upper()
-            icon = "[SECONDARY LOGIN]" if "LOGIN" in p_type else ("[INFECTION HOST]" if "INFECTION" in p_type else f"[{lp['pivot_type']}]")
+            icon = "[LOGIN]" if "LOGIN" in p_type else ("[HOST]" if "INFECTION" in p_type else f"[{lp['pivot_type']}]")
 
             nodes.append({
                 "id": pivot_node_id,
-                "label": f"{icon}\n{masked_val}",
+                "label": f"{icon} {short_val}",
                 "title": f"Type: {lp['pivot_type']}\nContext: {lp.get('context_note', '')}",
                 "group": "pivot",
                 "category": "breaches",
@@ -461,7 +497,7 @@ def build_identity_graph(
         style = HUB_STYLES["git"]
         nodes.append({
             "id": hub_git_id,
-            "label": f"[PROVENANCE HUB: DEVELOPER]\nGit Commit Archaeology\n{len(git_pivots)} Public Code Artifacts",
+            "label": f"[HUB: DEV & GIT] ({len(git_pivots)})\nCode Artifacts",
             "title": "Categorical Hub: Open source developer intelligence, public repositories, and author commit logs.",
             "group": "hub_git",
             "category": "git",
@@ -504,57 +540,57 @@ def build_identity_graph(
             is_disposable = "DISPOSABLE" in str(gp.get("pivot_type", "")).upper() or "burner" in p_val.lower()
 
             if is_disposable:
-                label_head = "[DISPOSABLE BURNER]"
+                label_head = "[BURNER]"
                 edge_label = "EVASION ALERT"
                 border_col = "#f59e0b"
                 bg_col = "#2e1005"
             elif is_subdomain:
-                label_head = "[CORPORATE GATEWAY]"
+                label_head = "[GATEWAY]"
                 edge_label = "EXPOSED PORTAL"
                 border_col = "#ef4444"
                 bg_col = "#200b0f"
             elif is_permutation:
-                label_head = "[EMAIL PERMUTATIONS]"
+                label_head = "[PERMUTATION]"
                 edge_label = "CORP SCHEME"
                 border_col = "#818cf8"
                 bg_col = "#15162c"
             elif is_gitlab:
-                label_head = "[GITLAB REPOSITORY]"
+                label_head = "[GITLAB]"
                 edge_label = "CODE REPO"
                 border_col = "#f97316"
                 bg_col = "#241208"
             elif is_ssh_key:
-                label_head = "[GITHUB SSH KEY]"
+                label_head = "[SSH KEY]"
                 edge_label = "CRYPTO KEY"
                 border_col = "#06b6d4"
                 bg_col = "#041b24"
             elif is_collaborator:
-                label_head = "[COLLABORATOR WORKSPACE]"
+                label_head = "[COLLAB]"
                 edge_label = "CONTRIBUTOR"
                 border_col = "#64748b"
                 bg_col = "#0f172a"
             elif is_portfolio:
-                label_head = "[DEVELOPER PORTFOLIO]"
+                label_head = "[PORTFOLIO]"
                 edge_label = "AUTHOR"
                 border_col = "#38bdf8"
                 bg_col = "#0c1f33"
             elif "github: @" in p_val.lower() or "github: " in p_val.lower():
-                label_head = "[GITHUB DEVELOPER ACCOUNT]"
+                label_head = "[GITHUB DEV]"
                 edge_label = "DEV ACCOUNT"
                 border_col = "#38bdf8"
                 bg_col = "#0a1f33"
             else:
-                label_head = "[OWNED REPOSITORY]"
+                label_head = "[REPOSITORY]"
                 edge_label = "AUTHOR"
                 border_col = "#38bdf8"
                 bg_col = "#0c1f33"
 
             conf_tier = "VERIFIED" if conf >= 0.95 else ("HIGH" if conf >= 0.80 else "MEDIUM")
-            label_head_with_conf = f"{label_head} • {conf_pct}% CONF"
+            short_pval = p_val[:24] + "..." if len(p_val) > 26 else p_val
 
             nodes.append({
                 "id": p_node_id,
-                "label": f"{label_head_with_conf}\n{p_val}",
+                "label": f"{label_head}\n{short_pval}",
                 "title": f"Git Artifact: {p_val}\nConfidence: {conf_pct}% ({conf_tier})\nContext: {c_note}",
                 "group": "pivot_git",
                 "category": "git",
@@ -718,12 +754,28 @@ def build_identity_graph(
                 cat_tag = "AVATAR: GRAVATAR"
                 acc_border = "#a855f7"
                 acc_bg = "#1f102e"
+            elif "youtube" in p_val_low or "twitch" in p_val_low or "vimeo" in p_val_low or "soundcloud" in p_val_low:
+                cat_tag = "CREATOR / MEDIA"
+                acc_border = "#ef4444"
+                acc_bg = "#2b0a0a"
+            elif "bluesky" in p_val_low or "reddit" in p_val_low:
+                cat_tag = "SOCIAL PERSONA"
+                acc_border = "#38bdf8"
+                acc_bg = "#0c2438"
+            elif "portfolio" in p_val_low or "website" in p_val_low or "github pages" in p_val_low or "linktree" in p_val_low or "substack" in p_val_low or "carrd" in p_val_low:
+                cat_tag = "PORTFOLIO / SITE"
+                acc_border = "#10b981"
+                acc_bg = "#06291a"
+            elif "sec edgar" in p_val_low or "companies house" in p_val_low or "handelsregister" in p_val_low or "chamber of commerce" in p_val_low or "kvk" in p_val_low:
+                cat_tag = "OFFICIAL REGISTRY"
+                acc_border = "#3b82f6"
+                acc_bg = "#0d1b33"
             elif "persona_pivot" in p_val_low or "discovered alias" in p_val_low:
                 cat_tag = "RECURSIVE ALIAS"
                 acc_border = "#c084fc"
                 acc_bg = "#220930"
-            elif "gamertag" in p_val_low or "brawlhalla" in p_val_low or "esports" in p_val_low:
-                cat_tag = "PROFILE: ESPORTS"
+            elif "gamertag" in p_val_low or "brawlhalla" in p_val_low or "esports" in p_val_low or "steam" in p_val_low or "chess.com" in p_val_low:
+                cat_tag = "GAMING & ESPORTS"
                 acc_border = "#f59e0b"
                 acc_bg = "#261a06"
             else:
@@ -1178,6 +1230,31 @@ def build_identity_graph(
                 s_bg = "#260b1c"
                 edge_label = "EXTRACTED"
 
+            # Compute intelligent pivot metadata for semantic nodes
+            can_piv = False
+            p_type_val = None
+            p_target_val = None
+
+            if p_type in ["FULL_NAME", "NAME"]:
+                can_piv = True
+                p_type_val = "NAME"
+                p_target_val = re.sub(r'^(Full Name|Name|Resolved Name):\s*', '', p_val, flags=re.I).strip()
+            elif p_type in ["WORKPLACE", "BUSINESS_ASSOCIATE", "EMPLOYER"]:
+                can_piv = True
+                p_type_val = "ORGANIZATION"
+                if " at " in p_val:
+                    p_target_val = p_val.split(" at ")[-1].strip()
+                elif p_val.startswith("Role:"):
+                    p_target_val = p_val.replace("Role:", "").strip()
+                else:
+                    p_target_val = p_val
+            elif "@" in p_val and "." in p_val:
+                m_em = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', p_val)
+                if m_em:
+                    can_piv = True
+                    p_type_val = "EMAIL"
+                    p_target_val = m_em.group(0)
+
             nodes.append({
                 "id": p_node_id,
                 "label": s_label,
@@ -1198,7 +1275,10 @@ def build_identity_graph(
                     "subtype": p_type,
                     "value": p_val,
                     "context": c_note,
-                    "category": "semantic"
+                    "category": "semantic",
+                    "can_pivot": can_piv,
+                    "pivot_type": p_type_val,
+                    "pivot_value": p_target_val
                 }
             })
 
@@ -1345,10 +1425,148 @@ def build_identity_graph(
                     "category": "telecom" if "PHONE" in str(sp.get("pivot_type", "")) else "identity"
                 })
 
+    # =========================================================================
+    # CANDIDATE PERSONA CLUSTERS & NAMESAKE DISAMBIGUATION BRANCHES
+    # =========================================================================
+    if candidate_clusters:
+        for c_idx, cluster in enumerate(candidate_clusters):
+            c_id = cluster.get("cluster_id") or f"cluster_{c_idx+1}"
+            c_label = cluster.get("cluster_label", f"Candidate Persona {c_idx+1}")
+            c_type = cluster.get("cluster_type", "CANDIDATE_PERSONA")
+            c_hub_id = f"hub_{c_id}"
+
+            nodes.append({
+                "id": c_hub_id,
+                "label": f"[{c_type}]\n{c_label}\n{len(cluster.get('profiles', []))} Disambiguated Candidates",
+                "title": f"Candidate Persona Cluster\nReason: {'; '.join(cluster.get('reasons', []))}",
+                "group": "candidate_cluster",
+                "category": "candidate_clusters",
+                "color": {
+                    "background": "#2a1205" if "NAMESAKE" in c_type else "#1c0d29",
+                    "border": "#f59e0b" if "NAMESAKE" in c_type else "#c084fc",
+                    "highlight": {"background": "#3f1b07", "border": "#fde047"}
+                },
+                "font": {"color": "#fef08a" if "NAMESAKE" in c_type else "#f3e8ff", "face": "'JetBrains Mono', monospace", "size": 10, "bold": True},
+                "shape": "box",
+                "margin": 10,
+                "borderWidth": 1.5,
+                "borderDashes": [4, 4],
+                "data": {
+                    "type": "CANDIDATE_CLUSTER_HUB",
+                    "cluster_id": c_id,
+                    "cluster_label": c_label,
+                    "cluster_type": c_type
+                }
+            })
+            edges.append({
+                "from": emp_node_id,
+                "to": c_hub_id,
+                "label": "DISAMBIGUATED PERSONA",
+                "color": {"color": "#f59e0b" if "NAMESAKE" in c_type else "#c084fc", "highlight": "#ffffff"},
+                "arrows": "to",
+                "width": 1.5,
+                "dashes": [6, 4],
+                "font": EDGE_FONT,
+                "category": "candidate_clusters"
+            })
+
+            for p_idx, prof in enumerate(cluster.get("profiles", [])[:5]):
+                prof_node_id = f"cand_prof_{c_id}_{p_idx+1}"
+                p_plat = prof.get("platform", "Platform")
+                p_handle = prof.get("handle") or prof.get("display_name") or "Profile"
+                p_url = prof.get("url") or ""
+                nodes.append({
+                    "id": prof_node_id,
+                    "label": f"[{p_plat}]\n{p_handle}",
+                    "title": f"Candidate Profile on {p_plat}\nURL: {p_url}\nConfidence: {prof.get('entity_resolution_score', 0.50)}",
+                    "group": "candidate_profile",
+                    "category": "candidate_clusters",
+                    "color": {
+                        "background": "#140a02" if "NAMESAKE" in c_type else "#0d0614",
+                        "border": "#d97706" if "NAMESAKE" in c_type else "#a855f7",
+                        "highlight": {"background": "#261304", "border": "#fbbf24"}
+                    },
+                    "font": {"color": "#fde68a" if "NAMESAKE" in c_type else "#e9d5ff", "face": "'JetBrains Mono', monospace", "size": 9, "bold": False},
+                    "shape": "box",
+                    "margin": 8,
+                    "borderWidth": 1.2,
+                    "borderDashes": [3, 3],
+                    "data": {
+                        "type": "CANDIDATE_PROFILE",
+                        "platform": p_plat,
+                        "url": p_url,
+                        "cluster_id": c_id
+                    }
+                })
+                edges.append({
+                    "from": c_hub_id,
+                    "to": prof_node_id,
+                    "label": "CANDIDATE ACCOUNT",
+                    "color": {"color": "#d97706" if "NAMESAKE" in c_type else "#a855f7", "highlight": "#ffffff"},
+                    "arrows": "to",
+                    "width": 1.2,
+                    "dashes": [3, 3],
+                    "font": EDGE_FONT,
+                    "category": "candidate_clusters"
+                })
+
     def strip_ui_styles(item):
         for key in ["color", "font", "shape", "margin", "borderWidth", "borderDashes", "dashes", "width"]:
             item.pop(key, None)
         return item
+
+    # Enrich nodes with ring level, severity tier, and timeline year
+    for node in nodes:
+        nid = str(node.get("id", ""))
+        grp = str(node.get("group", "")).lower()
+        cat = str(node.get("category", "")).lower()
+        ndata = node.get("data") if isinstance(node.get("data"), dict) else {}
+        node["data"] = ndata
+
+        # 1. Concentric Orbit Ring
+        if grp == "employee" or cat == "identity" or nid.startswith("emp_") or nid == "Target":
+            ring = 0
+            sev = "INFO"
+        elif nid.startswith("hub_") or ndata.get("type") == "PROVENANCE_HUB":
+            ring = 1
+            sev = "INFO"
+        elif grp in ["leak", "breach"] or nid.startswith("leak_") or nid.startswith("breach_"):
+            ring = 2
+            is_stealer = str(ndata.get("leak_type", "")).upper() == "INFOSTEALER"
+            sev = "CRITICAL" if is_stealer else str(ndata.get("severity", "HIGH")).upper()
+        elif grp in ["credential", "password", "hash"] or nid.startswith("cred_"):
+            ring = 3
+            has_plain = bool(ndata.get("password") or ndata.get("plaintext_password"))
+            is_corp = bool(ndata.get("is_corp") or ndata.get("is_corporate_password_match"))
+            sev = "CRITICAL" if (has_plain or is_corp) else "HIGH"
+        elif grp in ["account", "telecom", "location", "social", "gaming"] or cat in ["accounts", "telecom", "geo"]:
+            ring = 4
+            sev = "HIGH" if (grp in ["telecom", "account"] or cat == "telecom") else "MEDIUM"
+        elif "candidate" in grp or "suspected" in grp or "cluster" in grp:
+            ring = 5
+            sev = "LOW"
+        else:
+            ring = 4
+            sev = str(ndata.get("severity", "MEDIUM")).upper()
+
+        node["ring"] = ring
+        ndata["ring"] = ring
+        node["severity"] = sev
+        ndata["severity"] = sev
+
+        # 2. Extract Timeline Year
+        date_str = str(ndata.get("breach_date") or ndata.get("date") or node.get("label", "") + " " + node.get("title", ""))
+        year_match = re.search(r'\b(20[0-2][0-9]|199[0-9])\b', date_str)
+        if year_match:
+            year = int(year_match.group(1))
+        elif ring in (0, 1):
+            year = None  # Persistent anchor across all epochs
+        else:
+            year = 2024
+        node["year"] = year
+        ndata["year"] = year
+
+    stamp_graph_persona_ids(nodes, pivots)
 
     semantic_nodes = [strip_ui_styles(n) for n in nodes]
     semantic_edges = [strip_ui_styles(e) for e in edges]

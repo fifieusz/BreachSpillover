@@ -49,6 +49,24 @@ def verify_email_address(email: str) -> Dict[str, Any]:
             "is_disposable": False
         }
     
+    # 1b. Synthetic OSINT Investigation Targets (names, handles, lateral pivots)
+    if cleaned.endswith("@osint.local") or cleaned.endswith("@local"):
+        return {
+            "is_valid": True,
+            "status": "OSINT_TARGET",
+            "reason": "Universal OSINT query (name or handle) mapped to investigation profile.",
+            "domain": "osint.local",
+            "mx_found": True,
+            "is_disposable": False,
+            "provider_type": "OSINT Query Profile",
+            "email_security": {
+                "mail_provider": "OSINT Universal Correlator",
+                "spf_status": "INTERNAL",
+                "dmarc_status": "INTERNAL",
+                "spoofing_risk": "SAFE"
+            }
+        }
+
     if not EMAIL_REGEX.match(cleaned):
         return {
             "is_valid": False,
